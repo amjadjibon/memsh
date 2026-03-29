@@ -5,9 +5,12 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/spf13/cobra"
+
+	"github.com/amjadjibon/memsh/shell"
 )
 
 var pluginCmd = &cobra.Command{
@@ -19,8 +22,12 @@ var pluginListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List installed plugins",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		builtins := shell.BuiltinPluginNames()
+		sort.Strings(builtins)
 		fmt.Println("built-in:")
-		fmt.Println("  base64")
+		for _, name := range builtins {
+			fmt.Printf("  %s\n", name)
+		}
 
 		dir, err := pluginDir()
 		if err != nil {
