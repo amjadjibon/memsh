@@ -3,6 +3,7 @@ module github.com/amjadjibon/memsh
 go 1.26
 
 require (
+	github.com/chzyer/readline v1.5.1
 	github.com/spf13/afero v1.15.0
 	github.com/spf13/cobra v1.10.2
 	github.com/tetratelabs/wazero v1.11.0

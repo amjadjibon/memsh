@@ -83,6 +83,26 @@ func (s *Shell) Cwd() string {
 	return s.cwd
 }
 
+// ListDir lists entry names in a directory of the virtual FS.
+func (s *Shell) ListDir(path string) ([]string, error) {
+	abs := s.resolvePath(path)
+	f, err := s.fs.Open(abs)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	return f.Readdirnames(-1)
+}
+
+// RegisteredPlugins returns the names of all currently registered plugins.
+func (s *Shell) RegisteredPlugins() []string {
+	names := make([]string, 0, len(s.plugins))
+	for name := range s.plugins {
+		names = append(names, name)
+	}
+	return names
+}
+
 // Run executes a unified shell script string.
 func (s *Shell) Run(ctx context.Context, script string) error {
 	file, err := syntax.NewParser().Parse(strings.NewReader(script), "")

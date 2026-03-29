@@ -1,13 +1,15 @@
 package cmd
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
+	"github.com/chzyer/readline"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
@@ -39,52 +41,127 @@ var rootCmd = &cobra.Command{
 			return nil
 		}
 
-		// Interactive REPL mode
-		isTTY := term.IsTerminal(int(os.Stdin.Fd()))
-		if isTTY {
-			fmt.Println("memsh - virtual in-memory shell. Type 'exit' or press Ctrl+D to quit.")
+		// Non-interactive: pipe input line by line without readline.
+		if !term.IsTerminal(int(os.Stdin.Fd())) {
+			return runPiped(ctx, sh, os.Stdin)
 		}
 
-		scanner := bufio.NewScanner(os.Stdin)
-		for {
-			if isTTY {
-				fmt.Fprintf(os.Stderr, "memsh:%s$ ", sh.Cwd())
-			}
+		// Interactive REPL with tab completion and history.
+		return runInteractive(ctx, sh)
+	},
+}
 
-			if !scanner.Scan() {
+// runInteractive runs the readline-powered REPL.
+func runInteractive(ctx context.Context, sh *shell.Shell) error {
+	histFile := historyFile()
+
+	rl, err := readline.NewEx(&readline.Config{
+		Prompt:          prompt(sh),
+		AutoComplete:    &replCompleter{sh: sh},
+		HistoryFile:     histFile,
+		InterruptPrompt: "^C",
+		EOFPrompt:       "",
+	})
+	if err != nil {
+		return fmt.Errorf("readline: %w", err)
+	}
+	defer rl.Close()
+
+	fmt.Println("memsh - virtual in-memory shell. Type 'exit' or press Ctrl+D to quit.")
+
+	for {
+		rl.SetPrompt(prompt(sh))
+
+		line, err := rl.Readline()
+		if err == readline.ErrInterrupt {
+			if len(line) == 0 {
 				break
 			}
+			continue
+		}
+		if err == io.EOF {
+			break
+		}
 
-			line := scanner.Text()
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+
+		first := strings.Fields(line)[0]
+		if first == "exit" || first == "quit" {
+			break
+		}
+
+		if err := sh.Run(ctx, line); err != nil {
+			if errors.Is(err, shell.ErrExit) {
+				break
+			}
+			fmt.Fprintf(os.Stderr, "memsh: %v\n", err)
+		}
+	}
+
+	fmt.Println()
+	return nil
+}
+
+// runPiped reads commands from r line by line (no prompt, no readline).
+func runPiped(ctx context.Context, sh *shell.Shell, r io.Reader) error {
+	buf := make([]byte, 0, 4096)
+	tmp := make([]byte, 4096)
+	for {
+		n, err := r.Read(tmp)
+		buf = append(buf, tmp[:n]...)
+		for {
+			idx := strings.Index(string(buf), "\n")
+			if idx < 0 {
+				break
+			}
+			line := strings.TrimSpace(string(buf[:idx]))
+			buf = buf[idx+1:]
 			if line == "" {
 				continue
 			}
-
 			first := strings.Fields(line)[0]
 			if first == "exit" || first == "quit" {
-				break
+				return nil
 			}
-
-			if err := sh.Run(ctx, line); err != nil {
-				if errors.Is(err, shell.ErrExit) {
-					break
+			if runErr := sh.Run(ctx, line); runErr != nil {
+				if errors.Is(runErr, shell.ErrExit) {
+					return nil
 				}
-				fmt.Fprintf(os.Stderr, "memsh: %v\n", err)
+				fmt.Fprintf(os.Stderr, "memsh: %v\n", runErr)
 			}
 		}
-
-		if isTTY {
-			fmt.Println()
+		if err == io.EOF {
+			break
 		}
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
-		return nil
-	},
+func prompt(sh *shell.Shell) string {
+	return fmt.Sprintf("memsh:%s$ ", sh.Cwd())
+}
+
+func historyFile() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	dir := filepath.Join(home, ".memsh")
+	os.MkdirAll(dir, 0755)
+	return filepath.Join(dir, "history")
 }
 
 func init() {
 	rootCmd.AddCommand(versionCmd)
 }
 
+// Execute runs the root command.
 func Execute() {
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintf(os.Stderr, "memsh: %v\n", err)
