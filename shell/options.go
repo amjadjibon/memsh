@@ -32,6 +32,14 @@ func WithEnv(env map[string]string) Option {
 	}
 }
 
+// WithPluginBytes registers a WASM plugin directly from bytes, without needing
+// a file in /memsh/plugins/. The plugin must export command_name() and run().
+func WithPluginBytes(name string, wasm []byte) Option {
+	return func(s *Shell) {
+		s.plugins[name] = wasm
+	}
+}
+
 // WithStdIO sets the standard input, output, and error streams.
 func WithStdIO(in io.Reader, out, err io.Writer) Option {
 	return func(s *Shell) {

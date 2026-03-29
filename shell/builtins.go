@@ -43,12 +43,15 @@ func (s *Shell) execHandler(next interp.ExecHandlerFunc) interp.ExecHandlerFunc 
 		case "echo":
 			return s.builtinEcho(ctx, args)
 		default:
+			if _, ok := s.plugins[args[0]]; ok {
+				return s.runPlugin(ctx, args[0], args)
+			}
 			return next(ctx, args)
 		}
 	}
 }
 
-func (s *Shell) builtinCd(ctx context.Context, args []string) error {
+func (s *Shell) builtinCd(_ context.Context, args []string) error {
 	if len(args) > 2 {
 		return fmt.Errorf("cd: too many arguments")
 	}
@@ -86,12 +89,12 @@ func (s *Shell) builtinCd(ctx context.Context, args []string) error {
 	return nil
 }
 
-func (s *Shell) builtinPwd(ctx context.Context, args []string) error {
+func (s *Shell) builtinPwd(_ context.Context, _ []string) error {
 	_, err := fmt.Fprintln(s.stdout, s.cwd)
 	return err
 }
 
-func (s *Shell) builtinMkdir(ctx context.Context, args []string) error {
+func (s *Shell) builtinMkdir(_ context.Context, args []string) error {
 	if len(args) < 2 {
 		return fmt.Errorf("mkdir: missing operand")
 	}
@@ -172,7 +175,7 @@ func (s *Shell) builtinLs(ctx context.Context, args []string) error {
 	return nil
 }
 
-func (s *Shell) builtinCat(ctx context.Context, args []string) error {
+func (s *Shell) builtinCat(_ context.Context, args []string) error {
 	if len(args) < 2 {
 		return fmt.Errorf("cat: missing operand")
 	}
@@ -188,7 +191,7 @@ func (s *Shell) builtinCat(ctx context.Context, args []string) error {
 	return nil
 }
 
-func (s *Shell) builtinEcho(ctx context.Context, args []string) error {
+func (s *Shell) builtinEcho(_ context.Context, args []string) error {
 	for i, arg := range args[1:] {
 		if i > 0 {
 			fmt.Fprint(s.stdout, " ")

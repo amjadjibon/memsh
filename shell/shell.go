@@ -21,18 +21,22 @@ type Shell struct {
 	stdout io.Writer
 	stderr io.Writer
 
-	runner *interp.Runner
+	runner  *interp.Runner
+	plugins pluginRegistry
+	fds     map[uint32]afero.File
 }
 
 // New creates a new Shell instance with the provided options.
 func New(opts ...Option) (*Shell, error) {
 	s := &Shell{
-		fs:     afero.NewMemMapFs(),
-		cwd:    "/",
-		env:    make(map[string]string),
-		stdin:  os.Stdin,
-		stdout: os.Stdout,
-		stderr: os.Stderr,
+		fs:      afero.NewMemMapFs(),
+		cwd:     "/",
+		env:     make(map[string]string),
+		stdin:   os.Stdin,
+		stdout:  os.Stdout,
+		stderr:  os.Stderr,
+		plugins: make(pluginRegistry),
+		fds:     make(map[uint32]afero.File),
 	}
 
 	for _, opt := range opts {
@@ -59,6 +63,17 @@ func New(opts ...Option) (*Shell, error) {
 		return nil, err
 	}
 	s.runner = runner
+
+	// Register built-in plugins (don't overwrite user-supplied ones).
+	for name, wasm := range defaultPlugins {
+		if _, exists := s.plugins[name]; !exists {
+			s.plugins[name] = wasm
+		}
+	}
+
+	if err := s.loadPlugins(); err != nil {
+		return nil, err
+	}
 
 	return s, nil
 }
