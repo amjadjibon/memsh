@@ -56,18 +56,13 @@ func (s *Shell) builtinCd(_ context.Context, args []string) error {
 		return fmt.Errorf("cd: too many arguments")
 	}
 
-	var dir string
-	if len(args) == 1 {
-		// No args -> go home
-		// Let's assume / is home for now
-		dir = "/"
-	} else {
+	dir := "/"
+	if len(args) == 2 {
 		dir = args[1]
 	}
 
 	target := s.resolvePath(dir)
 
-	// Verify the directory exists in the virtual filesystem
 	info, err := s.fs.Stat(target)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -75,22 +70,17 @@ func (s *Shell) builtinCd(_ context.Context, args []string) error {
 		}
 		return err
 	}
-
 	if !info.IsDir() {
 		return fmt.Errorf("cd: %s: Not a directory", dir)
 	}
 
 	s.cwd = target
-	// We need to sync this to interp's Dir tracker if possible,
-	// though mvdan.cc/sh uses os.Chdir by default unless overriden.
-	// interp.Dir() configures the starting dir, but doesn't auto-track.
-	// If the shell script calls "cd", mvdan's DefaultExecHandler would handle it.
-	// Since we intercept it here, we're changing our `s.cwd`.
 	return nil
 }
 
-func (s *Shell) builtinPwd(_ context.Context, _ []string) error {
-	_, err := fmt.Fprintln(s.stdout, s.cwd)
+func (s *Shell) builtinPwd(ctx context.Context, _ []string) error {
+	hc := interp.HandlerCtx(ctx)
+	_, err := fmt.Fprintln(hc.Stdout, s.cwd)
 	return err
 }
 
@@ -99,28 +89,26 @@ func (s *Shell) builtinMkdir(_ context.Context, args []string) error {
 		return fmt.Errorf("mkdir: missing operand")
 	}
 	for _, dir := range args[1:] {
-		target := s.resolvePath(dir)
-		if err := s.fs.MkdirAll(target, 0755); err != nil {
+		if err := s.fs.MkdirAll(s.resolvePath(dir), 0755); err != nil {
 			return fmt.Errorf("mkdir: cannot create directory '%s': %w", dir, err)
 		}
 	}
 	return nil
 }
 
-func (s *Shell) builtinRm(ctx context.Context, args []string) error {
+func (s *Shell) builtinRm(_ context.Context, args []string) error {
 	if len(args) < 2 {
 		return fmt.Errorf("rm: missing operand")
 	}
 	for _, target := range args[1:] {
-		absPath := s.resolvePath(target)
-		if err := s.fs.RemoveAll(absPath); err != nil {
+		if err := s.fs.RemoveAll(s.resolvePath(target)); err != nil {
 			return fmt.Errorf("rm: cannot remove '%s': %w", target, err)
 		}
 	}
 	return nil
 }
 
-func (s *Shell) builtinTouch(ctx context.Context, args []string) error {
+func (s *Shell) builtinTouch(_ context.Context, args []string) error {
 	if len(args) < 2 {
 		return fmt.Errorf("touch: missing file operand")
 	}
@@ -143,6 +131,7 @@ func (s *Shell) builtinTouch(ctx context.Context, args []string) error {
 }
 
 func (s *Shell) builtinLs(ctx context.Context, args []string) error {
+	hc := interp.HandlerCtx(ctx)
 	target := s.cwd
 	if len(args) > 1 {
 		target = s.resolvePath(args[1])
@@ -160,7 +149,7 @@ func (s *Shell) builtinLs(ctx context.Context, args []string) error {
 	}
 
 	if !info.IsDir() {
-		fmt.Fprintln(s.stdout, filepath.Base(target))
+		fmt.Fprintln(hc.Stdout, filepath.Base(target))
 		return nil
 	}
 
@@ -168,14 +157,14 @@ func (s *Shell) builtinLs(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-
 	for _, name := range names {
-		fmt.Fprintln(s.stdout, name)
+		fmt.Fprintln(hc.Stdout, name)
 	}
 	return nil
 }
 
-func (s *Shell) builtinCat(_ context.Context, args []string) error {
+func (s *Shell) builtinCat(ctx context.Context, args []string) error {
+	hc := interp.HandlerCtx(ctx)
 	if len(args) < 2 {
 		return fmt.Errorf("cat: missing operand")
 	}
@@ -185,19 +174,20 @@ func (s *Shell) builtinCat(_ context.Context, args []string) error {
 		if err != nil {
 			return fmt.Errorf("cat: %s: No such file or directory", target)
 		}
-		io.Copy(s.stdout, f)
+		io.Copy(hc.Stdout, f)
 		f.Close()
 	}
 	return nil
 }
 
-func (s *Shell) builtinEcho(_ context.Context, args []string) error {
+func (s *Shell) builtinEcho(ctx context.Context, args []string) error {
+	hc := interp.HandlerCtx(ctx)
 	for i, arg := range args[1:] {
 		if i > 0 {
-			fmt.Fprint(s.stdout, " ")
+			fmt.Fprint(hc.Stdout, " ")
 		}
-		fmt.Fprint(s.stdout, arg)
+		fmt.Fprint(hc.Stdout, arg)
 	}
-	fmt.Fprintln(s.stdout)
+	fmt.Fprintln(hc.Stdout)
 	return nil
 }
