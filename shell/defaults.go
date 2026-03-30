@@ -21,6 +21,7 @@ func defaultNativePlugins() []plugins.Plugin {
 		native.WcPlugin{},
 		native.GrepPlugin{},
 		native.FindPlugin{},
+		native.AwkPlugin{},
 	}
 }
 

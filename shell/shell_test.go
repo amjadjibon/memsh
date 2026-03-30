@@ -1065,6 +1065,311 @@ func TestFind(t *testing.T) {
 }
 
 // ──────────────────────────────────────────────
+// 12. sort, uniq, cut, tr
+// ──────────────────────────────────────────────
+
+func TestSortUniqCutTr(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("sort basic", func(t *testing.T) {
+		fs := afero.NewMemMapFs()
+		afero.WriteFile(fs, "/f", []byte("banana\napple\ncherry\n"), 0644)
+		var buf bytes.Buffer
+		s := newTestShell(t, &buf, shell.WithFS(fs))
+		if err := s.Run(ctx, "sort /f"); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+		if lines[0] != "apple" || lines[1] != "banana" || lines[2] != "cherry" {
+			t.Errorf("unexpected sort output: %q", buf.String())
+		}
+	})
+
+	t.Run("sort -r reverse", func(t *testing.T) {
+		fs := afero.NewMemMapFs()
+		afero.WriteFile(fs, "/f", []byte("banana\napple\ncherry\n"), 0644)
+		var buf bytes.Buffer
+		s := newTestShell(t, &buf, shell.WithFS(fs))
+		if err := s.Run(ctx, "sort -r /f"); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+		if lines[0] != "cherry" {
+			t.Errorf("expected 'cherry' first in reverse sort, got %q", lines[0])
+		}
+	})
+
+	t.Run("sort -u deduplicates", func(t *testing.T) {
+		fs := afero.NewMemMapFs()
+		afero.WriteFile(fs, "/f", []byte("b\na\nb\na\n"), 0644)
+		var buf bytes.Buffer
+		s := newTestShell(t, &buf, shell.WithFS(fs))
+		if err := s.Run(ctx, "sort -u /f"); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		out := buf.String()
+		if strings.Count(out, "a") != 1 || strings.Count(out, "b") != 1 {
+			t.Errorf("sort -u did not deduplicate: %q", out)
+		}
+	})
+
+	t.Run("sort -n numeric", func(t *testing.T) {
+		fs := afero.NewMemMapFs()
+		afero.WriteFile(fs, "/f", []byte("10\n2\n30\n"), 0644)
+		var buf bytes.Buffer
+		s := newTestShell(t, &buf, shell.WithFS(fs))
+		if err := s.Run(ctx, "sort -n /f"); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+		if lines[0] != "2" || lines[1] != "10" || lines[2] != "30" {
+			t.Errorf("unexpected numeric sort output: %v", lines)
+		}
+	})
+
+	t.Run("uniq deduplicates adjacent lines", func(t *testing.T) {
+		fs := afero.NewMemMapFs()
+		afero.WriteFile(fs, "/f", []byte("a\na\nb\nb\nc\n"), 0644)
+		var buf bytes.Buffer
+		s := newTestShell(t, &buf, shell.WithFS(fs))
+		if err := s.Run(ctx, "uniq /f"); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		out := strings.TrimSpace(buf.String())
+		if out != "a\nb\nc" {
+			t.Errorf("unexpected uniq output: %q", out)
+		}
+	})
+
+	t.Run("uniq -c counts occurrences", func(t *testing.T) {
+		fs := afero.NewMemMapFs()
+		afero.WriteFile(fs, "/f", []byte("a\na\na\nb\n"), 0644)
+		var buf bytes.Buffer
+		s := newTestShell(t, &buf, shell.WithFS(fs))
+		if err := s.Run(ctx, "uniq -c /f"); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !strings.Contains(buf.String(), "3") {
+			t.Errorf("expected count 3, got %q", buf.String())
+		}
+	})
+
+	t.Run("cut -d: -f2 extracts second field", func(t *testing.T) {
+		fs := afero.NewMemMapFs()
+		afero.WriteFile(fs, "/f", []byte("a:b:c\n1:2:3\n"), 0644)
+		var buf bytes.Buffer
+		s := newTestShell(t, &buf, shell.WithFS(fs))
+		if err := s.Run(ctx, "cut -d : -f 2 /f"); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		out := strings.TrimSpace(buf.String())
+		if out != "b\n2" {
+			t.Errorf("unexpected cut output: %q", out)
+		}
+	})
+
+	t.Run("cut -c 1-3 extracts first three characters", func(t *testing.T) {
+		fs := afero.NewMemMapFs()
+		afero.WriteFile(fs, "/f", []byte("hello\nworld\n"), 0644)
+		var buf bytes.Buffer
+		s := newTestShell(t, &buf, shell.WithFS(fs))
+		if err := s.Run(ctx, "cut -c 1-3 /f"); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		out := strings.TrimSpace(buf.String())
+		if out != "hel\nwor" {
+			t.Errorf("unexpected cut -c output: %q", out)
+		}
+	})
+
+	t.Run("tr translates characters", func(t *testing.T) {
+		fs := afero.NewMemMapFs()
+		var buf bytes.Buffer
+		s := newTestShell(t, &buf, shell.WithFS(fs))
+		if err := s.Run(ctx, `echo hello | tr a-z A-Z`); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !strings.Contains(buf.String(), "HELLO") {
+			t.Errorf("expected HELLO, got %q", buf.String())
+		}
+	})
+
+	t.Run("tr -d deletes characters", func(t *testing.T) {
+		fs := afero.NewMemMapFs()
+		var buf bytes.Buffer
+		s := newTestShell(t, &buf, shell.WithFS(fs))
+		if err := s.Run(ctx, `echo hello | tr -d aeiou`); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if strings.ContainsAny(buf.String(), "aeiou") {
+			t.Errorf("expected vowels deleted, got %q", buf.String())
+		}
+	})
+}
+
+// ──────────────────────────────────────────────
+// 13. chmod, diff, stat, help, awk
+// ──────────────────────────────────────────────
+
+func TestChmodDiffStatHelp(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("chmod changes file mode", func(t *testing.T) {
+		fs := afero.NewMemMapFs()
+		afero.WriteFile(fs, "/f.txt", []byte("data"), 0644)
+		var buf bytes.Buffer
+		s := newTestShell(t, &buf, shell.WithFS(fs))
+		if err := s.Run(ctx, "chmod 755 /f.txt && stat /f.txt"); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !strings.Contains(buf.String(), "f.txt") {
+			t.Errorf("stat output missing filename: %q", buf.String())
+		}
+	})
+
+	t.Run("chmod missing mode returns error", func(t *testing.T) {
+		fs := afero.NewMemMapFs()
+		var buf bytes.Buffer
+		s := newTestShell(t, &buf, shell.WithFS(fs))
+		err := s.Run(ctx, "chmod /f.txt")
+		if err == nil {
+			t.Fatal("expected error for missing mode")
+		}
+	})
+
+	t.Run("stat shows file metadata", func(t *testing.T) {
+		fs := afero.NewMemMapFs()
+		afero.WriteFile(fs, "/data.txt", []byte("hello"), 0644)
+		var buf bytes.Buffer
+		s := newTestShell(t, &buf, shell.WithFS(fs))
+		if err := s.Run(ctx, "stat /data.txt"); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		out := buf.String()
+		for _, want := range []string{"File:", "Size:", "Mode:", "ModTime:"} {
+			if !strings.Contains(out, want) {
+				t.Errorf("stat output missing %q: %s", want, out)
+			}
+		}
+	})
+
+	t.Run("diff identical files returns no output", func(t *testing.T) {
+		fs := afero.NewMemMapFs()
+		afero.WriteFile(fs, "/a", []byte("line1\nline2\n"), 0644)
+		afero.WriteFile(fs, "/b", []byte("line1\nline2\n"), 0644)
+		var buf bytes.Buffer
+		s := newTestShell(t, &buf, shell.WithFS(fs))
+		if err := s.Run(ctx, "diff /a /b"); err != nil {
+			t.Fatalf("expected nil for identical files, got %v", err)
+		}
+		if buf.Len() != 0 {
+			t.Errorf("expected no output for identical files, got %q", buf.String())
+		}
+	})
+
+	t.Run("diff different files shows changes", func(t *testing.T) {
+		fs := afero.NewMemMapFs()
+		afero.WriteFile(fs, "/a", []byte("same\nonly-a\n"), 0644)
+		afero.WriteFile(fs, "/b", []byte("same\nonly-b\n"), 0644)
+		var buf bytes.Buffer
+		s := newTestShell(t, &buf, shell.WithFS(fs))
+		err := s.Run(ctx, "diff /a /b")
+		if err == nil {
+			t.Fatal("expected non-nil error (exit 1) for differing files")
+		}
+		out := buf.String()
+		if !strings.Contains(out, "< only-a") {
+			t.Errorf("expected '< only-a' in diff output: %q", out)
+		}
+		if !strings.Contains(out, "> only-b") {
+			t.Errorf("expected '> only-b' in diff output: %q", out)
+		}
+	})
+
+	t.Run("man without args lists commands", func(t *testing.T) {
+		var buf bytes.Buffer
+		s := newTestShell(t, &buf, shell.WithFS(afero.NewMemMapFs()))
+		if err := s.Run(ctx, "man"); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		out := buf.String()
+		for _, want := range []string{"cat", "grep", "sort", "awk"} {
+			if !strings.Contains(out, want) {
+				t.Errorf("man output missing %q", want)
+			}
+		}
+	})
+
+	t.Run("man shows usage for specific command", func(t *testing.T) {
+		var buf bytes.Buffer
+		s := newTestShell(t, &buf, shell.WithFS(afero.NewMemMapFs()))
+		if err := s.Run(ctx, "man grep"); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !strings.Contains(buf.String(), "grep") {
+			t.Errorf("man grep output missing usage: %q", buf.String())
+		}
+	})
+}
+
+func TestAwk(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("awk print second field from stdin", func(t *testing.T) {
+		var buf bytes.Buffer
+		s := newTestShell(t, &buf, shell.WithFS(afero.NewMemMapFs()))
+		if err := s.Run(ctx, `echo "hello world" | awk '{print $2}'`); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if strings.TrimSpace(buf.String()) != "world" {
+			t.Errorf("expected 'world', got %q", buf.String())
+		}
+	})
+
+	t.Run("awk processes virtual FS file", func(t *testing.T) {
+		fs := afero.NewMemMapFs()
+		afero.WriteFile(fs, "/data.txt", []byte("alice 30\nbob 25\n"), 0644)
+		var buf bytes.Buffer
+		s := newTestShell(t, &buf, shell.WithFS(fs))
+		if err := s.Run(ctx, `awk '{print $1}' /data.txt`); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		out := buf.String()
+		if !strings.Contains(out, "alice") || !strings.Contains(out, "bob") {
+			t.Errorf("unexpected awk output: %q", out)
+		}
+	})
+
+	t.Run("awk -f reads program from virtual FS", func(t *testing.T) {
+		fs := afero.NewMemMapFs()
+		afero.WriteFile(fs, "/prog.awk", []byte("{print $2}"), 0644)
+		afero.WriteFile(fs, "/data.txt", []byte("foo bar\nbaz qux\n"), 0644)
+		var buf bytes.Buffer
+		s := newTestShell(t, &buf, shell.WithFS(fs))
+		if err := s.Run(ctx, "awk -f /prog.awk /data.txt"); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		out := strings.TrimSpace(buf.String())
+		if out != "bar\nqux" {
+			t.Errorf("expected 'bar\\nqux', got %q", out)
+		}
+	})
+
+	t.Run("awk NR counts lines", func(t *testing.T) {
+		fs := afero.NewMemMapFs()
+		afero.WriteFile(fs, "/f", []byte("a\nb\nc\n"), 0644)
+		var buf bytes.Buffer
+		s := newTestShell(t, &buf, shell.WithFS(fs))
+		if err := s.Run(ctx, `awk 'END{print NR}' /f`); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if strings.TrimSpace(buf.String()) != "3" {
+			t.Errorf("expected NR=3, got %q", buf.String())
+		}
+	})
+}
+
+// ──────────────────────────────────────────────
 // Plugin interface tests
 // ──────────────────────────────────────────────
 
