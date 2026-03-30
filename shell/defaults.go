@@ -1,36 +1,34 @@
 package shell
 
 import (
-	"embed"
-	"path/filepath"
-	"strings"
+	"github.com/amjadjibon/memsh/shell/plugins"
+	"github.com/amjadjibon/memsh/shell/plugins/native"
 )
 
-//go:embed plugins/*.wasm
-var builtinPluginsFS embed.FS
+// defaultPlugins holds WASM plugins bundled at compile time.
+// Currently empty — base64 and wc are native Go plugins in shell/plugins/native/.
+// To bundle a .wasm file: add it to shell/plugins/ and restore:
+//
+//	//go:embed plugins/*.wasm
+//	var builtinPluginsFS embed.FS
+var defaultPlugins = map[string][]byte{}
 
-// defaultPlugins is populated at init from the embedded plugins directory.
-// Any .wasm file placed in shell/plugins/ is automatically registered.
-var defaultPlugins map[string][]byte
-
-func init() {
-	defaultPlugins = make(map[string][]byte)
-	entries, _ := builtinPluginsFS.ReadDir("plugins")
-	for _, e := range entries {
-		if e.IsDir() || filepath.Ext(e.Name()) != ".wasm" {
-			continue
-		}
-		data, _ := builtinPluginsFS.ReadFile("plugins/" + e.Name())
-		name := strings.TrimSuffix(e.Name(), ".wasm")
-		defaultPlugins[name] = data
+// defaultNativePlugins returns the built-in native Plugin implementations
+// registered on every new Shell unless overridden by a WithPlugin option.
+func defaultNativePlugins() []plugins.Plugin {
+	return []plugins.Plugin{
+		native.Base64Plugin{},
+		native.WcPlugin{},
 	}
 }
 
-// BuiltinPluginNames returns the names of all built-in WASM plugins embedded in the binary.
+// BuiltinPluginNames returns the names of built-in commands available without
+// external plugins (native Go implementations registered at startup).
 func BuiltinPluginNames() []string {
-	names := make([]string, 0, len(defaultPlugins))
-	for name := range defaultPlugins {
-		names = append(names, name)
+	plugins := defaultNativePlugins()
+	names := make([]string, len(plugins))
+	for i, p := range plugins {
+		names[i] = p.Name()
 	}
 	return names
 }

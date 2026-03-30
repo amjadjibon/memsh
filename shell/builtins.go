@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/amjadjibon/memsh/shell/plugins"
+	"github.com/spf13/afero"
 	"mvdan.cc/sh/v3/interp"
 )
 
@@ -22,6 +24,15 @@ func (s *Shell) execHandler(next interp.ExecHandlerFunc) interp.ExecHandlerFunc 
 		if len(args) == 0 {
 			return nil
 		}
+
+		// Inject shell-level state so Plugin.Run implementations can access
+		// the virtual FS, cwd, and env without needing a reference to Shell.
+		ctx = plugins.WithShellContext(ctx, plugins.ShellContext{
+			FS:          s.fs,
+			Cwd:         s.cwd,
+			Env:         func(key string) string { return s.env[key] },
+			ResolvePath: s.resolvePath,
+		})
 
 		switch args[0] {
 		case "exit", "quit":
@@ -42,7 +53,12 @@ func (s *Shell) execHandler(next interp.ExecHandlerFunc) interp.ExecHandlerFunc 
 			return s.builtinCat(ctx, args)
 		case "echo":
 			return s.builtinEcho(ctx, args)
+		case "tee":
+			return s.builtinTee(ctx, args)
 		default:
+			if fn, ok := s.builtins[args[0]]; ok {
+				return fn(ctx, args)
+			}
 			if _, ok := s.plugins[args[0]]; ok {
 				return s.runPlugin(ctx, args[0], args)
 			}
@@ -191,3 +207,47 @@ func (s *Shell) builtinEcho(ctx context.Context, args []string) error {
 	fmt.Fprintln(hc.Stdout)
 	return nil
 }
+
+// builtinTee reads stdin and writes to stdout AND each named virtual FS file.
+// -a appends instead of overwriting.
+func (s *Shell) builtinTee(ctx context.Context, args []string) error {
+	hc := interp.HandlerCtx(ctx)
+	appendMode := false
+	var targets []string
+
+	for _, a := range args[1:] {
+		if a == "-a" {
+			appendMode = true
+		} else {
+			targets = append(targets, a)
+		}
+	}
+
+	writers := []io.Writer{hc.Stdout}
+	var toClose []io.Closer
+
+	for _, t := range targets {
+		absPath := s.resolvePath(t)
+		var f afero.File
+		var err error
+		if appendMode {
+			f, err = s.fs.OpenFile(absPath, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0644)
+		} else {
+			f, err = s.fs.Create(absPath)
+		}
+		if err != nil {
+			return fmt.Errorf("tee: %s: %w", t, err)
+		}
+		writers = append(writers, f)
+		toClose = append(toClose, f)
+	}
+	defer func() {
+		for _, c := range toClose {
+			c.Close()
+		}
+	}()
+
+	_, err := io.Copy(io.MultiWriter(writers...), hc.Stdin)
+	return err
+}
+

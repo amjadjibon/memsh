@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/afero"
 
 	"github.com/amjadjibon/memsh/shell"
+	"github.com/amjadjibon/memsh/shell/plugins/native"
 )
 
 // newTestShell builds a Shell with stdout and stderr both wired to buf.
@@ -669,6 +670,95 @@ func TestMultipleCommands(t *testing.T) {
 		exists, _ := afero.Exists(fs, "/nested/deep.txt")
 		if !exists {
 			t.Errorf("expected /nested/deep.txt to exist")
+		}
+	})
+}
+
+// ──────────────────────────────────────────────
+// Plugin interface tests
+// ──────────────────────────────────────────────
+
+func TestPluginInterface(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("WithPlugin overrides default plugin", func(t *testing.T) {
+		// Re-registering Base64Plugin via WithPlugin should still work.
+		var buf bytes.Buffer
+		s, err := shell.New(
+			shell.WithStdIO(strings.NewReader(""), &buf, &buf),
+			shell.WithPlugin(native.Base64Plugin{}),
+		)
+		if err != nil {
+			t.Fatalf("shell.New: %v", err)
+		}
+		if err := s.Run(ctx, "echo hello | base64"); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !strings.Contains(buf.String(), "aGVsbG8K") {
+			t.Errorf("expected base64 output, got %q", buf.String())
+		}
+	})
+
+	t.Run("Register adds plugin after construction", func(t *testing.T) {
+		var buf bytes.Buffer
+		s, err := shell.New(shell.WithStdIO(strings.NewReader(""), &buf, &buf))
+		if err != nil {
+			t.Fatalf("shell.New: %v", err)
+		}
+		s.Register(native.Base64Plugin{}) // re-register to verify method works
+		if err := s.Run(ctx, "echo test | base64"); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if buf.Len() == 0 {
+			t.Error("expected output from base64 plugin")
+		}
+	})
+
+	t.Run("native base64 encode roundtrip", func(t *testing.T) {
+		var buf bytes.Buffer
+		s := newTestShell(t, &buf)
+		if err := s.Run(ctx, "echo hello | base64"); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got := strings.TrimSpace(buf.String()); got != "aGVsbG8K" {
+			t.Errorf("want aGVsbG8K, got %q", got)
+		}
+	})
+
+	t.Run("native wc -l counts lines from virtual FS file", func(t *testing.T) {
+		fs := afero.NewMemMapFs()
+		afero.WriteFile(fs, "/lines.txt", []byte("a\nb\nc\n"), 0644)
+		var buf bytes.Buffer
+		s := newTestShell(t, &buf, shell.WithFS(fs))
+		if err := s.Run(ctx, "wc -l /lines.txt"); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got := strings.TrimSpace(buf.String()); got != "3" {
+			t.Errorf("want 3, got %q", got)
+		}
+	})
+
+	t.Run("native wc -w counts words from stdin pipe", func(t *testing.T) {
+		var buf bytes.Buffer
+		s := newTestShell(t, &buf)
+		if err := s.Run(ctx, `echo "one two three" | wc -w`); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got := strings.TrimSpace(buf.String()); got != "3" {
+			t.Errorf("want 3, got %q", got)
+		}
+	})
+
+	t.Run("BuiltinPluginNames includes base64 and wc", func(t *testing.T) {
+		names := shell.BuiltinPluginNames()
+		nameSet := make(map[string]bool)
+		for _, n := range names {
+			nameSet[n] = true
+		}
+		for _, want := range []string{"base64", "wc"} {
+			if !nameSet[want] {
+				t.Errorf("BuiltinPluginNames: missing %q", want)
+			}
 		}
 	})
 }

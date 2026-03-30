@@ -2,69 +2,77 @@ package shell
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"os"
 	"strings"
 
+	"github.com/amjadjibon/memsh/shell/plugins"
 	"github.com/spf13/afero"
+	"github.com/tetratelabs/wazero"
+	"github.com/tetratelabs/wazero/imports/wasi_snapshot_preview1"
 	"mvdan.cc/sh/v3/interp"
 	"mvdan.cc/sh/v3/syntax"
 )
 
 // Shell represents the virtual bash session.
 type Shell struct {
-	fs     afero.Fs
-	cwd    string
-	env    map[string]string
+	fs  afero.Fs
+	cwd string
+	env map[string]string
 
 	stdin  io.Reader
 	stdout io.Writer
 	stderr io.Writer
 
-	runner  *interp.Runner
-	plugins pluginRegistry
-	fds     map[uint32]afero.File
+	runner   *interp.Runner
+	plugins  pluginRegistry
+	builtins map[string]BuiltinFunc
+	fds      map[uint32]afero.File
+
+	// wazero runtime shared across all plugin invocations.
+	// CompiledModules are pre-compiled at startup to avoid per-call bytecode compilation.
+	rt       wazero.Runtime
+	compiled map[string]wazero.CompiledModule
 }
 
 // New creates a new Shell instance with the provided options.
 func New(opts ...Option) (*Shell, error) {
 	s := &Shell{
-		fs:      afero.NewMemMapFs(),
-		cwd:     "/",
-		env:     make(map[string]string),
-		stdin:   os.Stdin,
-		stdout:  os.Stdout,
-		stderr:  os.Stderr,
-		plugins: make(pluginRegistry),
-		fds:     make(map[uint32]afero.File),
+		fs:       afero.NewMemMapFs(),
+		cwd:      "/",
+		env:      make(map[string]string),
+		stdin:    os.Stdin,
+		stdout:   os.Stdout,
+		stderr:   os.Stderr,
+		plugins:  make(pluginRegistry),
+		builtins: make(map[string]BuiltinFunc),
+		fds:      make(map[uint32]afero.File),
+		compiled: make(map[string]wazero.CompiledModule),
+	}
+
+	// Register default native plugins. Options applied below may override.
+	for _, p := range defaultNativePlugins() {
+		s.builtins[p.Name()] = p.Run
 	}
 
 	for _, opt := range opts {
 		opt(s)
 	}
 
-	// Initialize the runner
-	runnerOpts := []interp.RunnerOption{
+	// Initialize the runner.
+	runner, err := interp.New(
 		interp.StdIO(s.stdin, s.stdout, s.stderr),
-		// We'll set up the custom OpenHandler and ExecHandler next
 		interp.OpenHandler(s.openHandler),
 		interp.ExecHandlers(s.execHandler),
-        // Use a custom directory tracker
-        interp.Dir(s.cwd),
-	}
-
-    // Set up the environment tracking
-    // For mvdan.cc/sh we can provide an Env implementation if needed,
-    // or we can use the default and sync it.
-    // interp.Env(interp.FuncEnviron(...)) 
-
-	runner, err := interp.New(runnerOpts...)
+		interp.Dir(s.cwd),
+	)
 	if err != nil {
 		return nil, err
 	}
 	s.runner = runner
 
-	// Register built-in plugins (don't overwrite user-supplied ones).
+	// Register built-in WASM plugins (don't overwrite user-supplied ones).
 	for name, wasm := range defaultPlugins {
 		if _, exists := s.plugins[name]; !exists {
 			s.plugins[name] = wasm
@@ -75,7 +83,36 @@ func New(opts ...Option) (*Shell, error) {
 		return nil, err
 	}
 
+	// Create a shared wazero runtime and pre-compile all WASM plugins.
+	// Compiling bytecode once at startup is much cheaper than per-invocation.
+	initCtx := context.Background()
+	s.rt = wazero.NewRuntime(initCtx)
+	wasi_snapshot_preview1.MustInstantiate(initCtx, s.rt)
+
+	for name, wasm := range s.plugins {
+		cm, err := s.rt.CompileModule(initCtx, wasm)
+		if err != nil {
+			_ = s.rt.Close(initCtx)
+			return nil, fmt.Errorf("plugin %s: compile: %w", name, err)
+		}
+		s.compiled[name] = cm
+	}
+
 	return s, nil
+}
+
+// Close releases wazero resources. Call when the shell is no longer needed.
+func (s *Shell) Close() error {
+	if s.rt != nil {
+		return s.rt.Close(context.Background())
+	}
+	return nil
+}
+
+// Register adds a native Plugin to the shell. If a plugin with the same name
+// already exists it is replaced. Safe to call after New().
+func (s *Shell) Register(p plugins.Plugin) {
+	s.builtins[p.Name()] = p.Run
 }
 
 // Cwd returns the current working directory of the shell.

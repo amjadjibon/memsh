@@ -7,16 +7,22 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 
 	"github.com/spf13/afero"
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
-	"github.com/tetratelabs/wazero/imports/wasi_snapshot_preview1"
+	"github.com/tetratelabs/wazero/experimental/sysfs"
 	"github.com/tetratelabs/wazero/sys"
 	"mvdan.cc/sh/v3/interp"
 )
+
+// sysfsConfig casts wazero.FSConfig to sysfs.FSConfig so WithSysFSMount is available.
+func sysfsConfig(cfg wazero.FSConfig) sysfs.FSConfig {
+	return cfg.(sysfs.FSConfig)
+}
 
 // pluginRegistry maps command name → raw WASM bytes.
 type pluginRegistry map[string][]byte
@@ -81,60 +87,86 @@ func realPluginDir() (string, error) {
 	return filepath.Join(home, ".memsh", "plugins"), nil
 }
 
-// runPlugin executes a registered WASM plugin via a fresh wazero instance.
-// It detects whether the module is a standard WASI program (_start export) or a
-// custom memsh plugin (run export) and handles each case accordingly.
+// runPlugin executes a registered WASM plugin using the shared wazero runtime.
+// CompiledModules are pre-compiled at startup; this only instantiates the module.
+// If a plugin was added after startup it is compiled on first use and cached.
 func (s *Shell) runPlugin(ctx context.Context, name string, args []string) error {
-	wasmBytes := s.plugins[name]
-	hc := interp.HandlerCtx(ctx)
-
-	rt := wazero.NewRuntime(ctx)
-	defer rt.Close(ctx)
-
-	// Compile to inspect exports without executing.
-	compiled, err := rt.CompileModule(ctx, wasmBytes)
-	if err != nil {
-		return fmt.Errorf("plugin %s: compile: %w", name, err)
+	cm, ok := s.compiled[name]
+	if !ok {
+		// Plugin added after startup (e.g. dropped into virtual FS at runtime) — compile and cache.
+		wasmBytes, exists := s.plugins[name]
+		if !exists {
+			return fmt.Errorf("plugin %s: not found", name)
+		}
+		var err error
+		cm, err = s.rt.CompileModule(ctx, wasmBytes)
+		if err != nil {
+			return fmt.Errorf("plugin %s: compile: %w", name, err)
+		}
+		s.compiled[name] = cm
 	}
 
-	exports := compiled.ExportedFunctions()
+	hc := interp.HandlerCtx(ctx)
+	exports := cm.ExportedFunctions()
 	_, hasStart := exports["_start"]
 	_, hasRun := exports["run"]
 
 	if hasStart && !hasRun {
-		return s.runWASIPlugin(ctx, rt, compiled, hc, args, name)
+		return s.runWASIPlugin(ctx, cm, hc, args, name)
 	}
-	return s.runCustomPlugin(ctx, rt, compiled, hc, args, name)
+	return s.runCustomPlugin(ctx, cm, hc, args, name)
 }
 
 // runWASIPlugin runs a standard WASI module (_start is called during Instantiate).
-func (s *Shell) runWASIPlugin(ctx context.Context, rt wazero.Runtime, compiled wazero.CompiledModule, hc interp.HandlerContext, args []string, name string) error {
-	wasi_snapshot_preview1.MustInstantiate(ctx, rt)
+// WASI snapshot support is already registered on s.rt at startup.
+//
+// We mount the virtual FS directly via the experimental sysfs API so that
+// WASI writes go straight into afero.MemMapFs — no temp-dir bridge, no races.
+func (s *Shell) runWASIPlugin(ctx context.Context, compiled wazero.CompiledModule, hc interp.HandlerContext, args []string, name string) error {
+	// Resolve relative path args to absolute virtual paths.
+	resolved := make([]string, len(args))
+	copy(resolved, args)
+	for i := 1; i < len(resolved); i++ {
+		a := resolved[i]
+		if len(a) > 0 && a[0] != '-' && a[0] != '/' {
+			resolved[i] = path.Join(s.cwd, a)
+		}
+	}
+
+	fsConfig := sysfsConfig(wazero.NewFSConfig()).
+		WithSysFSMount(aferoSysFS{vfs: s.fs}, "/")
 
 	modConfig := wazero.NewModuleConfig().
 		WithStdin(nopCloser{hc.Stdin}).
 		WithStdout(nopWriteCloser{hc.Stdout}).
 		WithStderr(nopWriteCloser{hc.Stderr}).
-		WithArgs(args...).
+		WithArgs(resolved...).
+		WithFSConfig(fsConfig).
+		WithEnv("HOME", "/").
+		WithEnv("PWD", s.cwd).
+		WithEnv("PYTHONDONTWRITEBYTECODE", "1").
 		WithName("")
 
-	_, err := rt.InstantiateModule(ctx, compiled, modConfig)
-	if err != nil {
+	_, runErr := s.rt.InstantiateModule(ctx, compiled, modConfig)
+	if runErr != nil {
 		var exitErr *sys.ExitError
-		if errors.As(err, &exitErr) {
+		if errors.As(runErr, &exitErr) {
 			if exitErr.ExitCode() != 0 {
 				return fmt.Errorf("plugin %s: exit code %d", name, exitErr.ExitCode())
 			}
 			return nil
 		}
-		return fmt.Errorf("plugin %s: %w", name, err)
+		return fmt.Errorf("plugin %s: %w", name, runErr)
 	}
 	return nil
 }
 
+
 // runCustomPlugin runs a memsh-native plugin (exports run(argc) and uses memsh:: host functions).
-func (s *Shell) runCustomPlugin(ctx context.Context, rt wazero.Runtime, compiled wazero.CompiledModule, hc interp.HandlerContext, args []string, name string) error {
-	_, err := rt.NewHostModuleBuilder("memsh").
+// A fresh memsh host module is instantiated per invocation and closed when done,
+// so the per-call closures (hc, args) are properly scoped.
+func (s *Shell) runCustomPlugin(ctx context.Context, compiled wazero.CompiledModule, hc interp.HandlerContext, args []string, name string) error {
+	hostMod, err := s.rt.NewHostModuleBuilder("memsh").
 		NewFunctionBuilder().
 		WithFunc(func(ctx context.Context, m api.Module, ptr, length uint32) int32 {
 			buf, ok := m.Memory().Read(ptr, length)
@@ -244,8 +276,9 @@ func (s *Shell) runCustomPlugin(ctx context.Context, rt wazero.Runtime, compiled
 	if err != nil {
 		return fmt.Errorf("plugin %s: host module: %w", name, err)
 	}
+	defer hostMod.Close(ctx)
 
-	mod, err := rt.InstantiateModule(ctx, compiled,
+	mod, err := s.rt.InstantiateModule(ctx, compiled,
 		wazero.NewModuleConfig().WithStartFunctions().WithName(""))
 	if err != nil {
 		return fmt.Errorf("plugin %s: instantiate: %w", name, err)
@@ -301,3 +334,4 @@ func (s *Shell) closeFd(fd uint32) {
 		delete(s.fds, fd)
 	}
 }
+
