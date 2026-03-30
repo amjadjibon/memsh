@@ -124,12 +124,46 @@ func (s *Shell) runPlugin(ctx context.Context, name string, args []string) error
 // WASI writes go straight into afero.MemMapFs — no temp-dir bridge, no races.
 func (s *Shell) runWASIPlugin(ctx context.Context, compiled wazero.CompiledModule, hc interp.HandlerContext, args []string, name string) error {
 	// Resolve relative path args to absolute virtual paths.
+	// Skip arguments that follow flags like -c (Python), -e (Ruby), etc.
 	resolved := make([]string, len(args))
 	copy(resolved, args)
+	skipNext := false
 	for i := 1; i < len(resolved); i++ {
+		if skipNext {
+			skipNext = false
+			continue
+		}
+
 		a := resolved[i]
+		// Check if this is a flag that takes an argument
+		if a == "-c" || a == "-e" || a == "-E" {
+			skipNext = true
+			continue
+		}
+
+		// Don't resolve args that start with - or /
 		if len(a) > 0 && a[0] != '-' && a[0] != '/' {
 			resolved[i] = path.Join(s.cwd, a)
+		}
+	}
+
+	// Ruby-specific: inject -W0 flag to suppress warnings
+	if name == "ruby" && len(resolved) > 1 {
+		// Check if -W or -W flag already exists
+		hasWarnFlag := false
+		for _, arg := range resolved {
+			if arg == "-W0" || arg == "-w" || (len(arg) >= 2 && arg[0] == '-' && arg[1] == 'W') {
+				hasWarnFlag = true
+				break
+			}
+		}
+		if !hasWarnFlag {
+			// Insert -W0 after the command name
+			newArgs := make([]string, len(resolved)+1)
+			newArgs[0] = resolved[0]
+			newArgs[1] = "-W0"
+			copy(newArgs[2:], resolved[1:])
+			resolved = newArgs
 		}
 	}
 
