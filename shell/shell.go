@@ -30,6 +30,15 @@ type Shell struct {
 	builtins map[string]BuiltinFunc
 	fds      map[uint32]afero.File
 
+	// wasmEnabled controls whether the wazero runtime is started.
+	// Defaults to true; set via WithWASMEnabled(false) to skip WASM entirely.
+	wasmEnabled bool
+
+	// pluginFilter is an optional allowlist for plugin discovery.
+	// When non-nil, only plugins whose names are in the map are loaded
+	// from /memsh/plugins/ and ~/.memsh/plugins/.
+	pluginFilter map[string]struct{}
+
 	// wazero runtime shared across all plugin invocations.
 	// CompiledModules are pre-compiled at startup to avoid per-call bytecode compilation.
 	rt       wazero.Runtime
@@ -39,16 +48,17 @@ type Shell struct {
 // New creates a new Shell instance with the provided options.
 func New(opts ...Option) (*Shell, error) {
 	s := &Shell{
-		fs:       afero.NewMemMapFs(),
-		cwd:      "/",
-		env:      make(map[string]string),
-		stdin:    os.Stdin,
-		stdout:   os.Stdout,
-		stderr:   os.Stderr,
-		plugins:  make(pluginRegistry),
-		builtins: make(map[string]BuiltinFunc),
-		fds:      make(map[uint32]afero.File),
-		compiled: make(map[string]wazero.CompiledModule),
+		fs:          afero.NewMemMapFs(),
+		cwd:         "/",
+		env:         make(map[string]string),
+		stdin:       os.Stdin,
+		stdout:      os.Stdout,
+		stderr:      os.Stderr,
+		plugins:     make(pluginRegistry),
+		builtins:    make(map[string]BuiltinFunc),
+		fds:         make(map[uint32]afero.File),
+		compiled:    make(map[string]wazero.CompiledModule),
+		wasmEnabled: true,
 	}
 
 	// Register default native plugins. Options applied below may override.
@@ -72,30 +82,32 @@ func New(opts ...Option) (*Shell, error) {
 	}
 	s.runner = runner
 
-	// Register built-in WASM plugins (don't overwrite user-supplied ones).
-	for name, wasm := range defaultPlugins {
-		if _, exists := s.plugins[name]; !exists {
-			s.plugins[name] = wasm
+	if s.wasmEnabled {
+		// Register built-in WASM plugins (don't overwrite user-supplied ones).
+		for name, wasm := range defaultPlugins {
+			if _, exists := s.plugins[name]; !exists {
+				s.plugins[name] = wasm
+			}
 		}
-	}
 
-	if err := s.loadPlugins(); err != nil {
-		return nil, err
-	}
-
-	// Create a shared wazero runtime and pre-compile all WASM plugins.
-	// Compiling bytecode once at startup is much cheaper than per-invocation.
-	initCtx := context.Background()
-	s.rt = wazero.NewRuntime(initCtx)
-	wasi_snapshot_preview1.MustInstantiate(initCtx, s.rt)
-
-	for name, wasm := range s.plugins {
-		cm, err := s.rt.CompileModule(initCtx, wasm)
-		if err != nil {
-			_ = s.rt.Close(initCtx)
-			return nil, fmt.Errorf("plugin %s: compile: %w", name, err)
+		if err := s.loadPlugins(); err != nil {
+			return nil, err
 		}
-		s.compiled[name] = cm
+
+		// Create a shared wazero runtime and pre-compile all WASM plugins.
+		// Compiling bytecode once at startup is much cheaper than per-invocation.
+		initCtx := context.Background()
+		s.rt = wazero.NewRuntime(initCtx)
+		wasi_snapshot_preview1.MustInstantiate(initCtx, s.rt)
+
+		for name, wasm := range s.plugins {
+			cm, err := s.rt.CompileModule(initCtx, wasm)
+			if err != nil {
+				_ = s.rt.Close(initCtx)
+				return nil, fmt.Errorf("plugin %s: compile: %w", name, err)
+			}
+			s.compiled[name] = cm
+		}
 	}
 
 	return s, nil

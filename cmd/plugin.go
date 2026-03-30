@@ -25,11 +25,18 @@ var pluginListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List installed plugins",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		cfg, _ := loadConfig()
+
 		builtins := shell.BuiltinPluginNames()
 		sort.Strings(builtins)
 		fmt.Println("built-in:")
 		for _, name := range builtins {
 			fmt.Printf("  %s\n", name)
+		}
+
+		if !cfg.Shell.WASM {
+			fmt.Println("wasm: disabled (set [shell] wasm = true in ~/.memsh/config.toml to enable)")
+			return nil
 		}
 
 		dir, err := pluginDir()
@@ -45,11 +52,29 @@ var pluginListCmd = &cobra.Command{
 			return err
 		}
 
+		// Build allowlist from config (empty = show all).
+		allowlist := make(map[string]bool, len(cfg.Plugins.WASM))
+		for _, n := range cfg.Plugins.WASM {
+			allowlist[n] = true
+		}
+		disabled := make(map[string]bool, len(cfg.Plugins.Disable))
+		for _, n := range cfg.Plugins.Disable {
+			disabled[n] = true
+		}
+
 		var installed []string
 		for _, e := range entries {
-			if !e.IsDir() && filepath.Ext(e.Name()) == ".wasm" {
-				installed = append(installed, strings.TrimSuffix(e.Name(), ".wasm"))
+			if e.IsDir() || filepath.Ext(e.Name()) != ".wasm" {
+				continue
 			}
+			name := strings.TrimSuffix(e.Name(), ".wasm")
+			if disabled[name] {
+				continue
+			}
+			if len(allowlist) > 0 && !allowlist[name] {
+				continue
+			}
+			installed = append(installed, name)
 		}
 		if len(installed) > 0 {
 			fmt.Println("installed:")

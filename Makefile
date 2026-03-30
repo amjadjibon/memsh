@@ -9,6 +9,7 @@ PLUGIN_WASM := $(patsubst plugins/%/main.go,shell/plugins/%.wasm,$(PLUGIN_SRCS))
 all: build plugins
 
 build:
+	mkdir -p ./bin
 	go build -o ./bin/$(BINARY)
 
 install: build
@@ -21,4 +22,4 @@ shell/plugins/%.wasm: plugins/%/main.go
 	GOOS=wasip1 GOARCH=wasm go build -o $@ ./$(<D)
 
 clean:
-	rm -f $(BINARY) shell/plugins/*.wasm
+	rm -f ./bin/$(BINARY) shell/plugins/*.wasm

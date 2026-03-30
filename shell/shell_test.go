@@ -18,7 +18,10 @@ import (
 // Extra options are appended after the IO option so callers can override FS/cwd.
 func newTestShell(t *testing.T, buf *bytes.Buffer, opts ...shell.Option) *shell.Shell {
 	t.Helper()
-	base := []shell.Option{shell.WithStdIO(strings.NewReader(""), buf, buf)}
+	base := []shell.Option{
+		shell.WithStdIO(strings.NewReader(""), buf, buf),
+		shell.WithWASMEnabled(false), // no WASM needed; skips wazero init for speed
+	}
 	s, err := shell.New(append(base, opts...)...)
 	if err != nil {
 		t.Fatalf("shell.New: %v", err)
@@ -686,6 +689,7 @@ func TestPluginInterface(t *testing.T) {
 		var buf bytes.Buffer
 		s, err := shell.New(
 			shell.WithStdIO(strings.NewReader(""), &buf, &buf),
+			shell.WithWASMEnabled(false),
 			shell.WithPlugin(native.Base64Plugin{}),
 		)
 		if err != nil {
@@ -701,7 +705,10 @@ func TestPluginInterface(t *testing.T) {
 
 	t.Run("Register adds plugin after construction", func(t *testing.T) {
 		var buf bytes.Buffer
-		s, err := shell.New(shell.WithStdIO(strings.NewReader(""), &buf, &buf))
+		s, err := shell.New(
+			shell.WithStdIO(strings.NewReader(""), &buf, &buf),
+			shell.WithWASMEnabled(false),
+		)
 		if err != nil {
 			t.Fatalf("shell.New: %v", err)
 		}

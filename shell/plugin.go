@@ -40,6 +40,9 @@ func (s *Shell) loadPlugins() error {
 				return err
 			}
 			name := strings.TrimSuffix(filepath.Base(path), ".wasm")
+			if !s.pluginAllowed(name) {
+				return nil
+			}
 			if _, exists := s.plugins[name]; !exists {
 				data, err := afero.ReadFile(s.fs, path)
 				if err != nil {
@@ -67,6 +70,9 @@ func (s *Shell) loadPlugins() error {
 			continue
 		}
 		name := strings.TrimSuffix(e.Name(), ".wasm")
+		if !s.pluginAllowed(name) {
+			continue
+		}
 		if _, exists := s.plugins[name]; !exists {
 			data, err := os.ReadFile(filepath.Join(realDir, e.Name()))
 			if err != nil {
@@ -76,6 +82,16 @@ func (s *Shell) loadPlugins() error {
 		}
 	}
 	return nil
+}
+
+// pluginAllowed reports whether a discovered plugin name passes the filter.
+// When no filter is set all names are allowed.
+func (s *Shell) pluginAllowed(name string) bool {
+	if len(s.pluginFilter) == 0 {
+		return true
+	}
+	_, ok := s.pluginFilter[name]
+	return ok
 }
 
 // realPluginDir returns ~/.memsh/plugins on the real OS filesystem.

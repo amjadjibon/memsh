@@ -71,3 +71,36 @@ func WithStdIO(in io.Reader, out, err io.Writer) Option {
 		s.stderr = err
 	}
 }
+
+// WithWASMEnabled controls whether the wazero WASM plugin runtime is started.
+// Pass false to skip all WASM plugin loading (faster startup, no wazero overhead).
+func WithWASMEnabled(enabled bool) Option {
+	return func(s *Shell) {
+		s.wasmEnabled = enabled
+	}
+}
+
+// WithPluginFilter sets an allowlist of WASM plugin names to load during
+// discovery (/memsh/plugins/ and ~/.memsh/plugins/).
+// When the list is non-empty, only plugins whose names appear in it are loaded.
+// Plugins registered explicitly via WithPlugin or WithPluginBytes are unaffected.
+func WithPluginFilter(names []string) Option {
+	return func(s *Shell) {
+		s.pluginFilter = make(map[string]struct{}, len(names))
+		for _, n := range names {
+			s.pluginFilter[n] = struct{}{}
+		}
+	}
+}
+
+// WithDisabledPlugins removes the named plugins from the shell.
+// Works for both native (builtin) and WASM plugins.
+// Applied after defaults, so it can suppress defaultNativePlugins entries.
+func WithDisabledPlugins(names ...string) Option {
+	return func(s *Shell) {
+		for _, name := range names {
+			delete(s.builtins, name)
+			delete(s.plugins, name)
+		}
+	}
+}

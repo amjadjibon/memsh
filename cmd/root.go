@@ -24,7 +24,23 @@ var rootCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 
-		sh, err := shell.New()
+		cfg, err := loadConfig()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "memsh: config: %v\n", err)
+		}
+
+		var opts []shell.Option
+		if !cfg.Shell.WASM {
+			opts = append(opts, shell.WithWASMEnabled(false))
+		}
+		if len(cfg.Plugins.WASM) > 0 {
+			opts = append(opts, shell.WithPluginFilter(cfg.Plugins.WASM))
+		}
+		if len(cfg.Plugins.Disable) > 0 {
+			opts = append(opts, shell.WithDisabledPlugins(cfg.Plugins.Disable...))
+		}
+
+		sh, err := shell.New(opts...)
 		if err != nil {
 			return fmt.Errorf("failed to start: %w", err)
 		}
