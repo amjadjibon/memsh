@@ -2,12 +2,14 @@ package cmd
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/chzyer/readline"
 	"github.com/spf13/cobra"
@@ -163,14 +165,27 @@ func prompt(sh *shell.Shell) string {
 	return fmt.Sprintf("memsh:%s$ ", sh.Cwd())
 }
 
+// historyFile returns a per-session history file inside ~/.memsh/history/.
+// The filename is the first 16 hex chars of SHA-256(session start time),
+// so each REPL session gets its own file and files sort roughly by age.
 func historyFile() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return ""
 	}
-	dir := filepath.Join(home, ".memsh")
-	os.MkdirAll(dir, 0755)
-	return filepath.Join(dir, "history")
+	dir := filepath.Join(home, ".memsh", "history")
+	// Migrate: if the old single-file history exists, remove it so MkdirAll can
+	// create the directory in its place.
+	if info, err := os.Stat(dir); err == nil && !info.IsDir() {
+		os.Remove(dir)
+	}
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return ""
+	}
+	ts := fmt.Appendf(nil, "%d", time.Now().UnixNano())
+	hash := sha256.Sum256(ts)
+	name := fmt.Sprintf("%x", hash)
+	return filepath.Join(dir, name)
 }
 
 func init() {
