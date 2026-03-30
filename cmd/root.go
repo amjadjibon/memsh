@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -18,6 +19,11 @@ import (
 	"github.com/amjadjibon/memsh/shell"
 )
 
+var (
+	execCommand string
+	debugMode   bool
+)
+
 var rootCmd = &cobra.Command{
 	Use:   "memsh [script]",
 	Short: "memsh - virtual in-memory shell",
@@ -25,6 +31,11 @@ var rootCmd = &cobra.Command{
 	Args:  cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
+
+		if showVersion, _ := cmd.Flags().GetBool("version"); showVersion {
+			fmt.Println(getVersion())
+			return nil
+		}
 
 		cfg, err := loadConfig()
 		if err != nil {
@@ -47,11 +58,23 @@ var rootCmd = &cobra.Command{
 			return fmt.Errorf("failed to start: %w", err)
 		}
 
-		// Script file mode: memsh ./hello.sh
+		if execCommand != "" {
+			if debugMode {
+				fmt.Fprintf(os.Stderr, "memsh: executing: %s\n", execCommand)
+			}
+			if err := sh.Run(ctx, execCommand); err != nil && !errors.Is(err, shell.ErrExit) {
+				return err
+			}
+			return nil
+		}
+
 		if len(args) > 0 {
 			src, err := os.ReadFile(args[0])
 			if err != nil {
 				return err
+			}
+			if debugMode {
+				fmt.Fprintf(os.Stderr, "memsh: running script: %s\n", args[0])
 			}
 			if err := sh.Run(ctx, string(src)); err != nil && !errors.Is(err, shell.ErrExit) {
 				return err
@@ -59,18 +82,17 @@ var rootCmd = &cobra.Command{
 			return nil
 		}
 
-		// Non-interactive: pipe input line by line without readline.
 		if !term.IsTerminal(int(os.Stdin.Fd())) {
 			return runPiped(ctx, sh, os.Stdin)
 		}
 
-		// Interactive REPL with tab completion and history.
 		return runInteractive(ctx, sh)
 	},
 }
 
-// runInteractive runs the readline-powered REPL.
 func runInteractive(ctx context.Context, sh *shell.Shell) error {
+	loadMemshrc(sh, ctx)
+
 	histFile := historyFile()
 
 	rl, err := readline.NewEx(&readline.Config{
@@ -87,14 +109,23 @@ func runInteractive(ctx context.Context, sh *shell.Shell) error {
 
 	fmt.Println("memsh - virtual in-memory shell. Type 'exit' or press Ctrl+D to quit.")
 
+	var multiline strings.Builder
+	inMultiline := false
+
 	for {
-		rl.SetPrompt(prompt(sh))
+		p := prompt(sh)
+		if inMultiline {
+			p = "> "
+		}
+		rl.SetPrompt(p)
 
 		line, err := rl.Readline()
 		if err == readline.ErrInterrupt {
 			if len(line) == 0 {
 				break
 			}
+			inMultiline = false
+			multiline.Reset()
 			continue
 		}
 		if err == io.EOF {
@@ -106,11 +137,42 @@ func runInteractive(ctx context.Context, sh *shell.Shell) error {
 			continue
 		}
 
+		if needsContinuation(line) {
+			multiline.WriteString(line + "\n")
+			inMultiline = true
+			continue
+		}
+
+		if inMultiline {
+			multiline.WriteString(line)
+			script := multiline.String()
+			multiline.Reset()
+			inMultiline = false
+
+			first := strings.Fields(script)[0]
+			if first == "exit" || first == "quit" {
+				break
+			}
+			if debugMode {
+				fmt.Fprintf(os.Stderr, "memsh: executing multiline script\n")
+			}
+			if err := sh.Run(ctx, script); err != nil {
+				if errors.Is(err, shell.ErrExit) {
+					break
+				}
+				fmt.Fprintf(os.Stderr, "memsh: %v\n", err)
+			}
+			continue
+		}
+
 		first := strings.Fields(line)[0]
 		if first == "exit" || first == "quit" {
 			break
 		}
 
+		if debugMode {
+			fmt.Fprintf(os.Stderr, "memsh: executing: %s\n", line)
+		}
 		if err := sh.Run(ctx, line); err != nil {
 			if errors.Is(err, shell.ErrExit) {
 				break
@@ -123,7 +185,50 @@ func runInteractive(ctx context.Context, sh *shell.Shell) error {
 	return nil
 }
 
-// runPiped reads commands from r line by line (no prompt, no readline).
+func needsContinuation(line string) bool {
+	openCount := strings.Count(line, "{") + strings.Count(line, "(") + strings.Count(line, "[")
+	closeCount := strings.Count(line, "}") + strings.Count(line, ")") + strings.Count(line, "]")
+	if openCount > closeCount {
+		return true
+	}
+
+	trimmed := strings.TrimSpace(line)
+	if strings.HasSuffix(trimmed, "do") || strings.HasSuffix(trimmed, "then") || strings.HasSuffix(trimmed, "else") || strings.HasSuffix(trimmed, "elif") {
+		return true
+	}
+
+	words := strings.Fields(trimmed)
+	if len(words) > 0 && (words[0] == "for" || words[0] == "while" || words[0] == "until" || words[0] == "if" || words[0] == "case" || words[0] == "function") {
+		if !strings.Contains(trimmed, ";") && !strings.Contains(trimmed, "done") && !strings.Contains(trimmed, "fi") && !strings.Contains(trimmed, "esac") {
+			return true
+		}
+	}
+
+	if strings.HasSuffix(trimmed, "\\") {
+		return true
+	}
+
+	return false
+}
+
+func loadMemshrc(sh *shell.Shell, ctx context.Context) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+	rcPath := filepath.Join(home, ".memshrc")
+	data, err := os.ReadFile(rcPath)
+	if err != nil {
+		return
+	}
+	if debugMode {
+		fmt.Fprintf(os.Stderr, "memsh: loading %s\n", rcPath)
+	}
+	if err := sh.Run(ctx, string(data)); err != nil {
+		fmt.Fprintf(os.Stderr, "memsh: %s: %v\n", rcPath, err)
+	}
+}
+
 func runPiped(ctx context.Context, sh *shell.Shell, r io.Reader) error {
 	buf := make([]byte, 0, 4096)
 	tmp := make([]byte, 4096)
@@ -165,17 +270,12 @@ func prompt(sh *shell.Shell) string {
 	return fmt.Sprintf("memsh:%s$ ", sh.Cwd())
 }
 
-// historyFile returns a per-session history file inside ~/.memsh/history/.
-// The filename is the first 16 hex chars of SHA-256(session start time),
-// so each REPL session gets its own file and files sort roughly by age.
 func historyFile() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return ""
 	}
 	dir := filepath.Join(home, ".memsh", "history")
-	// Migrate: if the old single-file history exists, remove it so MkdirAll can
-	// create the directory in its place.
 	if info, err := os.Stat(dir); err == nil && !info.IsDir() {
 		os.Remove(dir)
 	}
@@ -190,12 +290,28 @@ func historyFile() string {
 
 func init() {
 	rootCmd.AddCommand(versionCmd)
+	rootCmd.Flags().StringVarP(&execCommand, "command", "c", "", "Execute a command string")
+	rootCmd.Flags().BoolVarP(&debugMode, "debug", "d", false, "Enable debug output")
+	rootCmd.Flags().BoolP("version", "v", false, "Print the version")
 }
 
-// Execute runs the root command.
 func Execute() {
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintf(os.Stderr, "memsh: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+func getVersion() string {
+	if info, ok := debug.ReadBuildInfo(); ok {
+		for _, s := range info.Settings {
+			if s.Key == "vcs.tag" && s.Value != "" {
+				return "memsh " + s.Value
+			}
+		}
+		if info.Main.Version != "" && info.Main.Version != "(devel)" {
+			return "memsh " + info.Main.Version
+		}
+	}
+	return "memsh dev"
 }

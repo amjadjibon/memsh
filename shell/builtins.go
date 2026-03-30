@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -18,19 +19,14 @@ import (
 	"mvdan.cc/sh/v3/interp"
 )
 
-// ErrExit is returned by the shell when an exit or quit command is executed.
 var ErrExit = errors.New("exit")
 
-// execHandler returns a middleware-style exec handler that intercepts known
-// built-in commands and delegates everything else to next.
 func (s *Shell) execHandler(next interp.ExecHandlerFunc) interp.ExecHandlerFunc {
 	return func(ctx context.Context, args []string) error {
 		if len(args) == 0 {
 			return nil
 		}
 
-		// Inject shell-level state so Plugin.Run implementations can access
-		// the virtual FS, cwd, and env without needing a reference to Shell.
 		ctx = plugins.WithShellContext(ctx, plugins.ShellContext{
 			FS:          s.fs,
 			Cwd:         s.cwd,
@@ -57,6 +53,8 @@ func (s *Shell) execHandler(next interp.ExecHandlerFunc) interp.ExecHandlerFunc 
 			return s.builtinCat(ctx, args)
 		case "echo":
 			return s.builtinEcho(ctx, args)
+		case "printf":
+			return s.builtinPrintf(ctx, args)
 		case "tee":
 			return s.builtinTee(ctx, args)
 		case "cp":
@@ -81,8 +79,42 @@ func (s *Shell) execHandler(next interp.ExecHandlerFunc) interp.ExecHandlerFunc 
 			return s.builtinDiff(ctx, args)
 		case "stat":
 			return s.builtinStat(ctx, args)
-		case "man":
+		case "wc":
+			return s.builtinWc(ctx, args)
+		case "man", "help":
 			return s.builtinHelp(ctx, args)
+		case "read":
+			return s.builtinRead(ctx, args)
+		case "seq":
+			return s.builtinSeq(ctx, args)
+		case "date":
+			return s.builtinDate(ctx, args)
+		case "sleep":
+			return s.builtinSleep(ctx, args)
+		case "rmdir":
+			return s.builtinRmdir(ctx, args)
+		case "yes":
+			return s.builtinYes(ctx, args)
+		case "env", "printenv":
+			return s.builtinEnv(ctx, args)
+		case "which", "type":
+			return s.builtinWhich(ctx, args)
+		case "ln":
+			return s.builtinLn(ctx, args)
+		case "xargs":
+			return s.builtinXargs(ctx, args)
+		case "source", ".":
+			return s.builtinSource(ctx, args)
+		case "du":
+			return s.builtinDu(ctx, args)
+		case "df":
+			return s.builtinDf(ctx, args)
+		case "grep":
+			return s.builtinGrep(ctx, args)
+		case "find":
+			return s.builtinFind(ctx, args)
+		case "sed":
+			return s.builtinSed(ctx, args)
 		default:
 			if fn, ok := s.builtins[args[0]]; ok {
 				return fn(ctx, args)
@@ -119,6 +151,7 @@ func (s *Shell) builtinCd(_ context.Context, args []string) error {
 	}
 
 	s.cwd = target
+	s.runner.Dir = target
 	return nil
 }
 
@@ -128,39 +161,182 @@ func (s *Shell) builtinPwd(ctx context.Context, _ []string) error {
 	return err
 }
 
-func (s *Shell) builtinMkdir(_ context.Context, args []string) error {
-	if len(args) < 2 {
+func (s *Shell) builtinMkdir(ctx context.Context, args []string) error {
+	verbose := false
+	var perm os.FileMode = 0755
+	var dirs []string
+
+	for i := 1; i < len(args); i++ {
+		switch args[i] {
+		case "-p":
+		case "-v":
+			verbose = true
+		case "-m":
+			if i+1 >= len(args) {
+				return fmt.Errorf("mkdir: missing operand for -m")
+			}
+			i++
+			v, err := strconv.ParseUint(args[i], 8, 32)
+			if err != nil {
+				return fmt.Errorf("mkdir: invalid mode '%s'", args[i])
+			}
+			perm = os.FileMode(v)
+		default:
+			dirs = append(dirs, args[i])
+		}
+	}
+
+	if len(dirs) == 0 {
 		return fmt.Errorf("mkdir: missing operand")
 	}
-	for _, dir := range args[1:] {
-		if err := s.fs.MkdirAll(s.resolvePath(dir), 0755); err != nil {
+
+	hc := interp.HandlerCtx(ctx)
+	for _, dir := range dirs {
+		if err := s.fs.MkdirAll(s.resolvePath(dir), perm); err != nil {
 			return fmt.Errorf("mkdir: cannot create directory '%s': %w", dir, err)
+		}
+		if verbose {
+			fmt.Fprintf(hc.Stdout, "mkdir: created directory '%s'\n", dir)
 		}
 	}
 	return nil
 }
 
-func (s *Shell) builtinRm(_ context.Context, args []string) error {
-	if len(args) < 2 {
+func (s *Shell) builtinRm(ctx context.Context, args []string) error {
+	force := false
+	recursive := false
+	verbose := false
+	dirOnly := false
+	var targets []string
+
+	for _, a := range args[1:] {
+		switch {
+		case a == "-f", a == "--force":
+			force = true
+		case a == "-r", a == "-R", a == "--recursive":
+			recursive = true
+		case a == "-i":
+		case a == "-v", a == "--verbose":
+			verbose = true
+		case a == "-d":
+			dirOnly = true
+		default:
+			targets = append(targets, a)
+		}
+	}
+
+	if len(targets) == 0 {
+		if force {
+			return nil
+		}
 		return fmt.Errorf("rm: missing operand")
 	}
-	for _, target := range args[1:] {
-		if err := s.fs.RemoveAll(s.resolvePath(target)); err != nil {
+
+	hc := interp.HandlerCtx(ctx)
+	for _, target := range targets {
+		absPath := s.resolvePath(target)
+		info, err := s.fs.Stat(absPath)
+		if err != nil {
+			if os.IsNotExist(err) && force {
+				continue
+			}
 			return fmt.Errorf("rm: cannot remove '%s': %w", target, err)
+		}
+		if info.IsDir() {
+			if !recursive && !dirOnly {
+				return fmt.Errorf("rm: cannot remove '%s': Is a directory", target)
+			}
+		}
+		if err := s.fs.RemoveAll(absPath); err != nil {
+			return fmt.Errorf("rm: cannot remove '%s': %w", target, err)
+		}
+		if verbose {
+			fmt.Fprintf(hc.Stdout, "removed '%s'\n", target)
+		}
+	}
+	return nil
+}
+
+func (s *Shell) builtinRmdir(ctx context.Context, args []string) error {
+	if len(args) < 2 {
+		return fmt.Errorf("rmdir: missing operand")
+	}
+	hc := interp.HandlerCtx(ctx)
+	for _, target := range args[1:] {
+		absPath := s.resolvePath(target)
+		info, err := s.fs.Stat(absPath)
+		if err != nil {
+			return fmt.Errorf("rmdir: cannot remove '%s': %w", target, err)
+		}
+		if !info.IsDir() {
+			return fmt.Errorf("rmdir: cannot remove '%s': Not a directory", target)
+		}
+		f, err := s.fs.Open(absPath)
+		if err != nil {
+			return err
+		}
+		names, _ := f.Readdirnames(-1)
+		f.Close()
+		if len(names) > 0 {
+			return fmt.Errorf("rmdir: cannot remove '%s': Directory not empty", target)
+		}
+		if err := s.fs.Remove(absPath); err != nil {
+			return fmt.Errorf("rmdir: cannot remove '%s': %w", target, err)
+		}
+		if len(args) > 2 {
+			fmt.Fprintf(hc.Stdout, "rmdir: removing directory, '%s'\n", target)
 		}
 	}
 	return nil
 }
 
 func (s *Shell) builtinTouch(_ context.Context, args []string) error {
-	if len(args) < 2 {
+	noCreate := false
+	reference := ""
+	var targets []string
+
+	for i := 1; i < len(args); i++ {
+		switch args[i] {
+		case "-c":
+			noCreate = true
+		case "-r":
+			if i+1 >= len(args) {
+				return fmt.Errorf("touch: missing operand for -r")
+			}
+			i++
+			reference = args[i]
+		default:
+			if !strings.HasPrefix(args[i], "-") || args[i] == "-" {
+				targets = append(targets, args[i])
+			}
+		}
+	}
+
+	if len(targets) == 0 {
 		return fmt.Errorf("touch: missing file operand")
 	}
-	for _, target := range args[1:] {
+
+	var refTime time.Time
+	if reference != "" {
+		refInfo, err := s.fs.Stat(s.resolvePath(reference))
+		if err != nil {
+			return fmt.Errorf("touch: cannot stat '%s': %w", reference, err)
+		}
+		refTime = refInfo.ModTime()
+	}
+
+	for _, target := range targets {
 		absPath := s.resolvePath(target)
 		now := time.Now()
-		if err := s.fs.Chtimes(absPath, now, now); err != nil {
+		t := now
+		if refTime.IsZero() == false {
+			t = refTime
+		}
+		if err := s.fs.Chtimes(absPath, t, t); err != nil {
 			if os.IsNotExist(err) {
+				if noCreate {
+					continue
+				}
 				f, err := s.fs.Create(absPath)
 				if err != nil {
 					return fmt.Errorf("touch: cannot touch '%s': %w", target, err)
@@ -176,33 +352,104 @@ func (s *Shell) builtinTouch(_ context.Context, args []string) error {
 
 func (s *Shell) builtinLs(ctx context.Context, args []string) error {
 	hc := interp.HandlerCtx(ctx)
-	target := s.cwd
-	if len(args) > 1 {
-		target = s.resolvePath(args[1])
+	longFormat := false
+	showAll := false
+	recursive := false
+	var targets []string
+
+	for _, a := range args[1:] {
+		switch {
+		case a == "-l", a == "--format=long":
+			longFormat = true
+		case a == "-a", a == "--all":
+			showAll = true
+		case a == "-R", a == "--recursive":
+			recursive = true
+		default:
+			targets = append(targets, a)
+		}
 	}
 
-	f, err := s.fs.Open(target)
-	if err != nil {
-		return fmt.Errorf("ls: cannot access '%s': %w", target, err)
-	}
-	defer f.Close()
-
-	info, err := f.Stat()
-	if err != nil {
-		return err
+	if len(targets) == 0 {
+		targets = []string{s.cwd}
 	}
 
-	if !info.IsDir() {
-		fmt.Fprintln(hc.Stdout, filepath.Base(target))
+	var listOne func(target string) error
+	listOne = func(target string) error {
+		absPath := s.resolvePath(target)
+		f, err := s.fs.Open(absPath)
+		if err != nil {
+			return fmt.Errorf("ls: cannot access '%s': %w", target, err)
+		}
+		defer f.Close()
+
+		info, err := f.Stat()
+		if err != nil {
+			return err
+		}
+
+		if !info.IsDir() {
+			if longFormat {
+				fmt.Fprintf(hc.Stdout, "%s  %8d  %s  %s\n", info.Mode(), info.Size(), info.ModTime().Format("Jan 02 15:04"), filepath.Base(target))
+			} else {
+				fmt.Fprintln(hc.Stdout, filepath.Base(target))
+			}
+			return nil
+		}
+
+		if recursive {
+			fmt.Fprintf(hc.Stdout, "%s:\n", target)
+		}
+
+		names, err := f.Readdirnames(-1)
+		if err != nil {
+			return err
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			if !showAll && strings.HasPrefix(name, ".") {
+				continue
+			}
+			if longFormat {
+				childPath := filepath.Join(absPath, name)
+				ci, err := s.fs.Stat(childPath)
+				if err != nil {
+					ci = nil
+				}
+				if ci != nil {
+					prefix := "-"
+					if ci.IsDir() {
+						prefix = "d"
+					}
+					fmt.Fprintf(hc.Stdout, "%s%s  %8d  %s  %s\n", prefix, ci.Mode().Perm(), ci.Size(), ci.ModTime().Format("Jan 02 15:04"), name)
+				} else {
+					fmt.Fprintln(hc.Stdout, name)
+				}
+			} else {
+				fmt.Fprintln(hc.Stdout, name)
+			}
+		}
+
+		if recursive {
+			for _, name := range names {
+				if !showAll && strings.HasPrefix(name, ".") {
+					continue
+				}
+				childPath := filepath.Join(absPath, name)
+				ci, err := s.fs.Stat(childPath)
+				if err == nil && ci.IsDir() {
+					fmt.Fprintln(hc.Stdout)
+					listOne(filepath.Join(target, name))
+				}
+			}
+		}
 		return nil
 	}
 
-	names, err := f.Readdirnames(-1)
-	if err != nil {
-		return err
-	}
-	for _, name := range names {
-		fmt.Fprintln(hc.Stdout, name)
+	for _, target := range targets {
+		if err := listOne(target); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -210,9 +457,17 @@ func (s *Shell) builtinLs(ctx context.Context, args []string) error {
 func (s *Shell) builtinCat(ctx context.Context, args []string) error {
 	hc := interp.HandlerCtx(ctx)
 	if len(args) < 2 {
-		return fmt.Errorf("cat: missing operand")
+		_, err := io.Copy(hc.Stdout, hc.Stdin)
+		return err
 	}
 	for _, target := range args[1:] {
+		if target == "-" {
+			_, err := io.Copy(hc.Stdout, hc.Stdin)
+			if err != nil {
+				return err
+			}
+			continue
+		}
 		absPath := s.resolvePath(target)
 		f, err := s.fs.Open(absPath)
 		if err != nil {
@@ -226,14 +481,224 @@ func (s *Shell) builtinCat(ctx context.Context, args []string) error {
 
 func (s *Shell) builtinEcho(ctx context.Context, args []string) error {
 	hc := interp.HandlerCtx(ctx)
-	for i, arg := range args[1:] {
-		if i > 0 {
-			fmt.Fprint(hc.Stdout, " ")
+	noNewline := false
+	interpretEsc := false
+	var parts []string
+	skipFlags := true
+
+	for _, arg := range args[1:] {
+		if skipFlags {
+			if arg == "-n" {
+				noNewline = true
+				continue
+			}
+			if arg == "-e" {
+				interpretEsc = true
+				continue
+			}
+			if arg == "-ne" || arg == "-en" {
+				noNewline = true
+				interpretEsc = true
+				continue
+			}
+			if arg == "-E" {
+				continue
+			}
+			if strings.HasPrefix(arg, "-") && len(arg) > 1 {
+				hasFlags := true
+				for _, c := range arg[1:] {
+					if c != 'n' && c != 'e' && c != 'E' {
+						hasFlags = false
+						break
+					}
+				}
+				if hasFlags {
+					for _, c := range arg[1:] {
+						switch c {
+						case 'n':
+							noNewline = true
+						case 'e':
+							interpretEsc = true
+						}
+					}
+					continue
+				}
+			}
 		}
-		fmt.Fprint(hc.Stdout, arg)
+		skipFlags = false
+		parts = append(parts, arg)
 	}
-	fmt.Fprintln(hc.Stdout)
+
+	text := strings.Join(parts, " ")
+	if interpretEsc {
+		text = expandEscapeSequences(text)
+	}
+
+	if noNewline {
+		fmt.Fprint(hc.Stdout, text)
+	} else {
+		fmt.Fprintln(hc.Stdout, text)
+	}
 	return nil
+}
+
+func expandEscapeSequences(s string) string {
+	var sb strings.Builder
+	sb.Grow(len(s))
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\\' && i+1 < len(s) {
+			switch s[i+1] {
+			case 'n':
+				sb.WriteByte('\n')
+				i++
+			case 't':
+				sb.WriteByte('\t')
+				i++
+			case 'r':
+				sb.WriteByte('\r')
+				i++
+			case '\\':
+				sb.WriteByte('\\')
+				i++
+			case 'a':
+				sb.WriteByte('\a')
+				i++
+			case 'b':
+				sb.WriteByte('\b')
+				i++
+			case 'f':
+				sb.WriteByte('\f')
+				i++
+			case 'v':
+				sb.WriteByte('\v')
+				i++
+			case 'x':
+				if i+3 < len(s) {
+					hex := s[i+2 : i+4]
+					if v, err := strconv.ParseUint(hex, 16, 8); err == nil {
+						sb.WriteByte(byte(v))
+						i += 3
+						continue
+					}
+				}
+				sb.WriteByte(s[i])
+			default:
+				if s[i+1] >= '0' && s[i+1] <= '7' {
+					end := i + 2
+					for end < len(s) && end < i+4 && s[end] >= '0' && s[end] <= '7' {
+						end++
+					}
+					if v, err := strconv.ParseUint(s[i+1:end], 8, 8); err == nil {
+						sb.WriteByte(byte(v))
+						i = end - 1
+						continue
+					}
+				}
+				sb.WriteByte(s[i])
+			}
+		} else {
+			sb.WriteByte(s[i])
+		}
+	}
+	return sb.String()
+}
+
+func (s *Shell) builtinPrintf(ctx context.Context, args []string) error {
+	hc := interp.HandlerCtx(ctx)
+	if len(args) < 2 {
+		return nil
+	}
+	format := args[1]
+	formatArgs := args[2:]
+
+	result := expandPrintfFormat(format, formatArgs)
+	fmt.Fprint(hc.Stdout, result)
+	return nil
+}
+
+func expandPrintfFormat(format string, args []string) string {
+	var sb strings.Builder
+	argIdx := 0
+	for i := 0; i < len(format); i++ {
+		if format[i] == '\\' && i+1 < len(format) {
+			switch format[i+1] {
+			case 'n':
+				sb.WriteByte('\n')
+				i++
+			case 't':
+				sb.WriteByte('\t')
+				i++
+			case 'r':
+				sb.WriteByte('\r')
+				i++
+			case '\\':
+				sb.WriteByte('\\')
+				i++
+			case 'a':
+				sb.WriteByte('\a')
+				i++
+			case 'b':
+				sb.WriteByte('\b')
+				i++
+			case 'f':
+				sb.WriteByte('\f')
+				i++
+			case 'v':
+				sb.WriteByte('\v')
+				i++
+			default:
+				sb.WriteByte(format[i])
+			}
+			continue
+		}
+		if format[i] == '%' && i+1 < len(format) {
+			spec := format[i+1]
+			arg := ""
+			if argIdx < len(args) {
+				arg = args[argIdx]
+				argIdx++
+			}
+			switch spec {
+			case 's':
+				sb.WriteString(arg)
+			case 'd':
+				if v, err := strconv.Atoi(arg); err == nil {
+					sb.WriteString(strconv.Itoa(v))
+				} else {
+					sb.WriteByte('0')
+				}
+			case 'f':
+				if v, err := strconv.ParseFloat(arg, 64); err == nil {
+					sb.WriteString(strconv.FormatFloat(v, 'f', -1, 64))
+				} else {
+					sb.WriteString("0.000000")
+				}
+			case '%':
+				sb.WriteByte('%')
+				argIdx--
+			case 'c':
+				if len(arg) > 0 {
+					sb.WriteByte(arg[0])
+				}
+			case 'x':
+				if v, err := strconv.Atoi(arg); err == nil {
+					sb.WriteString(strconv.FormatInt(int64(v), 16))
+				}
+			case 'o':
+				if v, err := strconv.Atoi(arg); err == nil {
+					sb.WriteString(strconv.FormatInt(int64(v), 8))
+				}
+			default:
+				sb.WriteByte('%')
+				sb.WriteByte(spec)
+				argIdx--
+			}
+			i++
+			continue
+		}
+		sb.WriteByte(format[i])
+	}
+	return sb.String()
 }
 
 func (s *Shell) builtinCp(_ context.Context, args []string) error {
@@ -243,6 +708,9 @@ func (s *Shell) builtinCp(_ context.Context, args []string) error {
 		switch a {
 		case "-r", "-R", "--recursive":
 			recursive = true
+		case "-v", "--verbose":
+		case "-p", "--preserve":
+		case "-i", "--interactive":
 		default:
 			positional = append(positional, a)
 		}
@@ -251,33 +719,39 @@ func (s *Shell) builtinCp(_ context.Context, args []string) error {
 		return fmt.Errorf("cp: missing destination file operand")
 	}
 
-	src := s.resolvePath(positional[0])
-	dst := s.resolvePath(positional[1])
+	dst := s.resolvePath(positional[len(positional)-1])
+	sources := positional[:len(positional)-1]
 
-	srcInfo, err := s.fs.Stat(src)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return fmt.Errorf("cp: cannot stat '%s': No such file or directory", positional[0])
+	for _, src := range sources {
+		absSrc := s.resolvePath(src)
+		srcInfo, err := s.fs.Stat(absSrc)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return fmt.Errorf("cp: cannot stat '%s': No such file or directory", src)
+			}
+			return fmt.Errorf("cp: %w", err)
 		}
-		return fmt.Errorf("cp: %w", err)
-	}
 
-	if srcInfo.IsDir() {
-		if !recursive {
-			return fmt.Errorf("cp: -r not specified; omitting directory '%s'", positional[0])
+		target := dst
+		dstInfo, _ := s.fs.Stat(dst)
+		if dstInfo != nil && dstInfo.IsDir() {
+			target = filepath.Join(dst, filepath.Base(absSrc))
 		}
-		dstInfo, err := s.fs.Stat(dst)
-		if err == nil && dstInfo.IsDir() {
-			dst = filepath.Join(dst, filepath.Base(src))
-		}
-		return s.cpDir(src, dst)
-	}
 
-	dstInfo, err := s.fs.Stat(dst)
-	if err == nil && dstInfo.IsDir() {
-		dst = filepath.Join(dst, filepath.Base(src))
+		if srcInfo.IsDir() {
+			if !recursive {
+				return fmt.Errorf("cp: -r not specified; omitting directory '%s'", src)
+			}
+			if err := s.cpDir(absSrc, target); err != nil {
+				return err
+			}
+		} else {
+			if err := s.cpFile(absSrc, target); err != nil {
+				return err
+			}
+		}
 	}
-	return s.cpFile(src, dst)
+	return nil
 }
 
 func (s *Shell) cpFile(src, dst string) error {
@@ -319,16 +793,20 @@ func (s *Shell) builtinMv(_ context.Context, args []string) error {
 		return fmt.Errorf("mv: missing destination file operand")
 	}
 
-	src := s.resolvePath(args[1])
-	dst := s.resolvePath(args[2])
+	dst := s.resolvePath(args[len(args)-1])
+	sources := args[1 : len(args)-1]
 
-	dstInfo, err := s.fs.Stat(dst)
-	if err == nil && dstInfo.IsDir() {
-		dst = filepath.Join(dst, filepath.Base(src))
-	}
+	for _, src := range sources {
+		absSrc := s.resolvePath(src)
+		target := dst
+		dstInfo, _ := s.fs.Stat(dst)
+		if dstInfo != nil && dstInfo.IsDir() {
+			target = filepath.Join(dst, filepath.Base(absSrc))
+		}
 
-	if err := s.fs.Rename(src, dst); err != nil {
-		return fmt.Errorf("mv: cannot move '%s' to '%s': %w", args[1], args[2], err)
+		if err := s.fs.Rename(absSrc, target); err != nil {
+			return fmt.Errorf("mv: cannot move '%s' to '%s': %w", src, args[len(args)-1], err)
+		}
 	}
 	return nil
 }
@@ -336,6 +814,8 @@ func (s *Shell) builtinMv(_ context.Context, args []string) error {
 func (s *Shell) builtinHead(ctx context.Context, args []string) error {
 	hc := interp.HandlerCtx(ctx)
 	n := 10
+	byteMode := false
+	byteCount := 0
 	var files []string
 
 	for i := 1; i < len(args); i++ {
@@ -356,20 +836,49 @@ func (s *Shell) builtinHead(ctx context.Context, args []string) error {
 				return fmt.Errorf("head: invalid number of lines: '%s'", a[2:])
 			}
 			n = v
+		} else if a == "-c" {
+			if i+1 >= len(args) {
+				return fmt.Errorf("head: option requires an argument -- 'c'")
+			}
+			i++
+			byteMode = true
+			v, err := strconv.Atoi(args[i])
+			if err != nil || v < 0 {
+				return fmt.Errorf("head: invalid number of bytes: '%s'", args[i])
+			}
+			byteCount = v
+		} else if strings.HasPrefix(a, "-c") {
+			byteMode = true
+			v, err := strconv.Atoi(a[2:])
+			if err != nil || v < 0 {
+				return fmt.Errorf("head: invalid number of bytes: '%s'", a[2:])
+			}
+			byteCount = v
 		} else {
 			files = append(files, a)
 		}
 	}
 
+	readHead := func(r io.Reader) error {
+		if byteMode {
+			_, err := io.CopyN(hc.Stdout, r, int64(byteCount))
+			if err != nil && err != io.EOF {
+				return err
+			}
+			return nil
+		}
+		return headLines(r, hc.Stdout, n)
+	}
+
 	if len(files) == 0 {
-		return headLines(hc.Stdin, hc.Stdout, n)
+		return readHead(hc.Stdin)
 	}
 	for _, f := range files {
 		r, err := s.fs.Open(s.resolvePath(f))
 		if err != nil {
 			return fmt.Errorf("head: %s: %w", f, err)
 		}
-		err = headLines(r, hc.Stdout, n)
+		err = readHead(r)
 		r.Close()
 		if err != nil {
 			return err
@@ -389,6 +898,8 @@ func headLines(r io.Reader, w io.Writer, n int) error {
 func (s *Shell) builtinTail(ctx context.Context, args []string) error {
 	hc := interp.HandlerCtx(ctx)
 	n := 10
+	byteMode := false
+	byteCount := 0
 	var files []string
 
 	for i := 1; i < len(args); i++ {
@@ -409,20 +920,54 @@ func (s *Shell) builtinTail(ctx context.Context, args []string) error {
 				return fmt.Errorf("tail: invalid number of lines: '%s'", a[2:])
 			}
 			n = v
+		} else if a == "-c" {
+			if i+1 >= len(args) {
+				return fmt.Errorf("tail: option requires an argument -- 'c'")
+			}
+			i++
+			byteMode = true
+			v, err := strconv.Atoi(args[i])
+			if err != nil || v < 0 {
+				return fmt.Errorf("tail: invalid number of bytes: '%s'", args[i])
+			}
+			byteCount = v
+		} else if strings.HasPrefix(a, "-c") {
+			byteMode = true
+			v, err := strconv.Atoi(a[2:])
+			if err != nil || v < 0 {
+				return fmt.Errorf("tail: invalid number of bytes: '%s'", a[2:])
+			}
+			byteCount = v
 		} else {
 			files = append(files, a)
 		}
 	}
 
+	readTail := func(r io.Reader) error {
+		if byteMode {
+			data, err := io.ReadAll(r)
+			if err != nil {
+				return err
+			}
+			start := len(data) - byteCount
+			if start < 0 {
+				start = 0
+			}
+			_, err = hc.Stdout.Write(data[start:])
+			return err
+		}
+		return tailLines(r, hc.Stdout, n)
+	}
+
 	if len(files) == 0 {
-		return tailLines(hc.Stdin, hc.Stdout, n)
+		return readTail(hc.Stdin)
 	}
 	for _, f := range files {
 		r, err := s.fs.Open(s.resolvePath(f))
 		if err != nil {
 			return fmt.Errorf("tail: %s: %w", f, err)
 		}
-		err = tailLines(r, hc.Stdout, n)
+		err = readTail(r)
 		r.Close()
 		if err != nil {
 			return err
@@ -450,8 +995,6 @@ func tailLines(r io.Reader, w io.Writer, n int) error {
 	return nil
 }
 
-// builtinTee reads stdin and writes to stdout AND each named virtual FS file.
-// -a appends instead of overwriting.
 func (s *Shell) builtinTee(ctx context.Context, args []string) error {
 	hc := interp.HandlerCtx(ctx)
 	appendMode := false
@@ -492,8 +1035,6 @@ func (s *Shell) builtinTee(ctx context.Context, args []string) error {
 	_, err := io.Copy(io.MultiWriter(writers...), hc.Stdin)
 	return err
 }
-
-// ── sort ─────────────────────────────────────────────────────────────────────
 
 func (s *Shell) builtinSort(ctx context.Context, args []string) error {
 	hc := interp.HandlerCtx(ctx)
@@ -549,8 +1090,6 @@ func (s *Shell) builtinSort(ctx context.Context, args []string) error {
 	return nil
 }
 
-// ── uniq ─────────────────────────────────────────────────────────────────────
-
 func (s *Shell) builtinUniq(ctx context.Context, args []string) error {
 	hc := interp.HandlerCtx(ctx)
 	count, onlyDups, onlyUniq := false, false, false
@@ -604,8 +1143,6 @@ func (s *Shell) builtinUniq(ctx context.Context, args []string) error {
 	return nil
 }
 
-// ── cut ──────────────────────────────────────────────────────────────────────
-
 func (s *Shell) builtinCut(ctx context.Context, args []string) error {
 	hc := interp.HandlerCtx(ctx)
 	delim := "\t"
@@ -629,6 +1166,7 @@ func (s *Shell) builtinCut(ctx context.Context, args []string) error {
 				i++
 				charList = args[i]
 			}
+		case "-s":
 		default:
 			files = append(files, args[i])
 		}
@@ -675,8 +1213,6 @@ func (s *Shell) builtinCut(ctx context.Context, args []string) error {
 	return nil
 }
 
-// parseRangeList parses a cut-style range list like "1,3,5-7,9-" (1-based)
-// and returns a sorted de-duplicated slice of 0-based indices up to max.
 func parseRangeList(spec string, max int) ([]int, error) {
 	seen := map[int]bool{}
 	for _, part := range strings.Split(spec, ",") {
@@ -722,11 +1258,9 @@ func parseRangeList(spec string, max int) ([]int, error) {
 	return result, nil
 }
 
-// ── tr ───────────────────────────────────────────────────────────────────────
-
 func (s *Shell) builtinTr(ctx context.Context, args []string) error {
 	hc := interp.HandlerCtx(ctx)
-	delete, squeeze := false, false
+	delete, squeeze, complement := false, false, false
 	var positional []string
 
 	for _, a := range args[1:] {
@@ -735,6 +1269,8 @@ func (s *Shell) builtinTr(ctx context.Context, args []string) error {
 			delete = true
 		case "-s":
 			squeeze = true
+		case "-c":
+			complement = true
 		default:
 			positional = append(positional, a)
 		}
@@ -745,6 +1281,23 @@ func (s *Shell) builtinTr(ctx context.Context, args []string) error {
 	}
 
 	set1 := expandTrSet(positional[0])
+	if complement {
+		var complemented []rune
+		for r := rune(0); r <= 127; r++ {
+			found := false
+			for _, sr := range set1 {
+				if sr == r {
+					found = true
+					break
+				}
+			}
+			if !found {
+				complemented = append(complemented, r)
+			}
+		}
+		set1 = complemented
+	}
+
 	set1Map := make(map[rune]bool, len(set1))
 	for _, r := range set1 {
 		set1Map[r] = true
@@ -777,7 +1330,6 @@ func (s *Shell) builtinTr(ctx context.Context, args []string) error {
 			sb.WriteRune(mapped)
 			prev = mapped
 		} else if squeeze && set1Map[r] && r == prev {
-			// squeeze repeated chars in set1 (no set2 case)
 			continue
 		} else {
 			sb.WriteRune(r)
@@ -789,6 +1341,14 @@ func (s *Shell) builtinTr(ctx context.Context, args []string) error {
 }
 
 func expandTrSet(s string) []rune {
+	s = strings.ReplaceAll(s, "[:alpha:]", "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz")
+	s = strings.ReplaceAll(s, "[:digit:]", "0123456789")
+	s = strings.ReplaceAll(s, "[:lower:]", "abcdefghijklmnopqrstuvwxyz")
+	s = strings.ReplaceAll(s, "[:upper:]", "ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+	s = strings.ReplaceAll(s, "[:space:]", " \t\n\r\f\v")
+	s = strings.ReplaceAll(s, "[:alnum:]", "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789")
+	s = strings.ReplaceAll(s, "[:punct:]", "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~")
+
 	runes := []rune(s)
 	var out []rune
 	for i := 0; i < len(runes); i++ {
@@ -813,31 +1373,157 @@ func runeIndex(set []rune, r rune) int {
 	return -1
 }
 
-// ── chmod ─────────────────────────────────────────────────────────────────────
-
 func (s *Shell) builtinChmod(_ context.Context, args []string) error {
 	if len(args) < 3 {
 		return fmt.Errorf("chmod: missing operand")
 	}
 	modeStr := args[1]
-	v, err := strconv.ParseUint(modeStr, 8, 32)
-	if err != nil {
-		return fmt.Errorf("chmod: invalid mode '%s'", modeStr)
+
+	recursive := false
+	var targets []string
+	for _, a := range args[2:] {
+		if a == "-R" {
+			recursive = true
+		} else {
+			targets = append(targets, a)
+		}
 	}
-	mode := os.FileMode(v)
-	for _, target := range args[2:] {
-		if err := s.fs.Chmod(s.resolvePath(target), mode); err != nil {
-			return fmt.Errorf("chmod: cannot chmod '%s': %w", target, err)
+
+	var mode os.FileMode
+	if strings.ContainsAny(modeStr, "ugoa+-=rwx") {
+		m, err := parseSymbolicMode(modeStr)
+		if err != nil {
+			return fmt.Errorf("chmod: invalid mode '%s': %w", modeStr, err)
+		}
+		mode = m
+	} else {
+		v, err := strconv.ParseUint(modeStr, 8, 32)
+		if err != nil {
+			return fmt.Errorf("chmod: invalid mode '%s'", modeStr)
+		}
+		mode = os.FileMode(v)
+	}
+
+	for _, target := range targets {
+		absPath := s.resolvePath(target)
+		if recursive {
+			if err := afero.Walk(s.fs, absPath, func(path string, info os.FileInfo, err error) error {
+				if err != nil {
+					return err
+				}
+				return s.fs.Chmod(path, mode)
+			}); err != nil {
+				return fmt.Errorf("chmod: cannot chmod '%s': %w", target, err)
+			}
+		} else {
+			if err := s.fs.Chmod(absPath, mode); err != nil {
+				return fmt.Errorf("chmod: cannot chmod '%s': %w", target, err)
+			}
 		}
 	}
 	return nil
 }
 
-// ── diff ──────────────────────────────────────────────────────────────────────
+func parseSymbolicMode(spec string) (os.FileMode, error) {
+	mode := os.FileMode(0644)
+	parts := strings.Split(spec, ",")
+	for _, part := range parts {
+		who := ""
+		op := ""
+		perm := ""
+		i := 0
+		for i < len(part) && (part[i] == 'u' || part[i] == 'g' || part[i] == 'o' || part[i] == 'a') {
+			who += string(part[i])
+			i++
+		}
+		if who == "" {
+			who = "a"
+		}
+		if i >= len(part) {
+			return 0, fmt.Errorf("invalid mode")
+		}
+		op = string(part[i])
+		i++
+		for i < len(part) && (part[i] == 'r' || part[i] == 'w' || part[i] == 'x') {
+			perm += string(part[i])
+			i++
+		}
+
+		for _, w := range who {
+			for _, p := range perm {
+				bit := os.FileMode(0)
+				switch p {
+				case 'r':
+					switch w {
+					case 'u':
+						bit = 0400
+					case 'g':
+						bit = 0040
+					case 'o':
+						bit = 0004
+					case 'a':
+						bit = 0400 | 0040 | 0004
+					}
+				case 'w':
+					switch w {
+					case 'u':
+						bit = 0200
+					case 'g':
+						bit = 0020
+					case 'o':
+						bit = 0002
+					case 'a':
+						bit = 0200 | 0020 | 0002
+					}
+				case 'x':
+					switch w {
+					case 'u':
+						bit = 0100
+					case 'g':
+						bit = 0010
+					case 'o':
+						bit = 0001
+					case 'a':
+						bit = 0100 | 0010 | 0001
+					}
+				}
+				switch op {
+				case "+":
+					mode |= bit
+				case "-":
+					mode &^= bit
+				case "=":
+					mask := os.FileMode(0)
+					switch w {
+					case 'u':
+						mask = 0700
+					case 'g':
+						mask = 0070
+					case 'o':
+						mask = 0007
+					case 'a':
+						mask = 0777
+					}
+					mode = (mode &^ mask) | bit
+				}
+			}
+		}
+	}
+	return mode, nil
+}
 
 func (s *Shell) builtinDiff(ctx context.Context, args []string) error {
 	hc := interp.HandlerCtx(ctx)
-	if len(args) < 3 {
+	unified := false
+	var files []string
+	for _, a := range args[1:] {
+		if a == "-u" {
+			unified = true
+		} else {
+			files = append(files, a)
+		}
+	}
+	if len(files) < 2 {
 		return fmt.Errorf("diff: missing operand")
 	}
 
@@ -855,17 +1541,16 @@ func (s *Shell) builtinDiff(ctx context.Context, args []string) error {
 		return lines, sc.Err()
 	}
 
-	a, err := readFileLines(args[1])
+	a, err := readFileLines(files[0])
 	if err != nil {
 		return err
 	}
-	b, err := readFileLines(args[2])
+	b, err := readFileLines(files[1])
 	if err != nil {
 		return err
 	}
 
-	// LCS-based diff
-	edits := lcsEdits(a, b)
+	edits := lcsEdits(a, b, unified, files[0], files[1])
 	changed := false
 	for _, e := range edits {
 		changed = true
@@ -877,10 +1562,8 @@ func (s *Shell) builtinDiff(ctx context.Context, args []string) error {
 	return nil
 }
 
-// lcsEdits returns a slice of "< line" / "> line" diff lines using LCS.
-func lcsEdits(a, b []string) []string {
+func lcsEdits(a, b []string, unified bool, fileA, fileB string) []string {
 	m, n := len(a), len(b)
-	// dp[i][j] = LCS length of a[:i] and b[:j]
 	dp := make([][]int, m+1)
 	for i := range dp {
 		dp[i] = make([]int, n+1)
@@ -896,7 +1579,7 @@ func lcsEdits(a, b []string) []string {
 			}
 		}
 	}
-	// Backtrack
+
 	var edits []string
 	i, j := m, n
 	for i > 0 || j > 0 {
@@ -912,14 +1595,16 @@ func lcsEdits(a, b []string) []string {
 			i--
 		}
 	}
-	// Reverse
 	for l, r := 0, len(edits)-1; l < r; l, r = l+1, r-1 {
 		edits[l], edits[r] = edits[r], edits[l]
 	}
+
+	if unified {
+		header := []string{"--- " + fileA, "+++ " + fileB}
+		return append(header, edits...)
+	}
 	return edits
 }
-
-// ── stat ──────────────────────────────────────────────────────────────────────
 
 func (s *Shell) builtinStat(ctx context.Context, args []string) error {
 	hc := interp.HandlerCtx(ctx)
@@ -940,33 +1625,726 @@ func (s *Shell) builtinStat(ctx context.Context, args []string) error {
 	return nil
 }
 
-// ── help / man ────────────────────────────────────────────────────────────────
+func (s *Shell) builtinWc(ctx context.Context, args []string) error {
+	hc := interp.HandlerCtx(ctx)
+	countLines, countWords, countBytes := false, false, false
+	var files []string
+
+	for _, a := range args[1:] {
+		switch a {
+		case "-l":
+			countLines = true
+		case "-w":
+			countWords = true
+		case "-c":
+			countBytes = true
+		default:
+			files = append(files, a)
+		}
+	}
+
+	if !countLines && !countWords && !countBytes {
+		countLines, countWords, countBytes = true, true, true
+	}
+
+	totalL, totalW, totalB := 0, 0, 0
+
+	wcOne := func(r io.Reader, name string) error {
+		data, err := io.ReadAll(r)
+		if err != nil {
+			return err
+		}
+		content := string(data)
+		lc := strings.Count(content, "\n")
+		if len(content) > 0 && !strings.HasSuffix(content, "\n") {
+			lc++
+		}
+		wc := len(strings.Fields(content))
+		bc := len(data)
+
+		totalL += lc
+		totalW += wc
+		totalB += bc
+
+		var parts []string
+		if countLines {
+			parts = append(parts, fmt.Sprintf("%d", lc))
+		}
+		if countWords {
+			parts = append(parts, fmt.Sprintf("%d", wc))
+		}
+		if countBytes {
+			parts = append(parts, fmt.Sprintf("%d", bc))
+		}
+		if name != "" {
+			parts = append(parts, name)
+		}
+		fmt.Fprintln(hc.Stdout, strings.Join(parts, " "))
+		return nil
+	}
+
+	if len(files) == 0 {
+		return wcOne(hc.Stdin, "")
+	}
+
+	for _, f := range files {
+		r, err := s.fs.Open(s.resolvePath(f))
+		if err != nil {
+			return fmt.Errorf("wc: %s: %w", f, err)
+		}
+		if err := wcOne(r, f); err != nil {
+			r.Close()
+			return err
+		}
+		r.Close()
+	}
+
+	if len(files) > 1 {
+		var parts []string
+		if countLines {
+			parts = append(parts, fmt.Sprintf("%d", totalL))
+		}
+		if countWords {
+			parts = append(parts, fmt.Sprintf("%d", totalW))
+		}
+		if countBytes {
+			parts = append(parts, fmt.Sprintf("%d", totalB))
+		}
+		parts = append(parts, "total")
+		fmt.Fprintln(hc.Stdout, strings.Join(parts, " "))
+	}
+	return nil
+}
+
+func (s *Shell) builtinGrep(ctx context.Context, args []string) error {
+	hc := interp.HandlerCtx(ctx)
+	caseInsensitive := false
+	showLineNum := false
+	invert := false
+	recursive := false
+	countMode := false
+	listFiles := false
+	wholeWord := false
+	_ = false
+	onlyMatch := false
+	var pattern string
+	var files []string
+
+	for i := 1; i < len(args); i++ {
+		switch args[i] {
+		case "-i":
+			caseInsensitive = true
+		case "-n":
+			showLineNum = true
+		case "-v":
+			invert = true
+		case "-r", "-R":
+			recursive = true
+		case "-c":
+			countMode = true
+		case "-l":
+			listFiles = true
+		case "-w":
+			wholeWord = true
+		case "-E":
+		case "-o":
+			onlyMatch = true
+		case "-q":
+		case "-s":
+		default:
+			if pattern == "" {
+				pattern = args[i]
+			} else {
+				files = append(files, args[i])
+			}
+		}
+	}
+
+	if pattern == "" {
+		return fmt.Errorf("grep: missing pattern")
+	}
+
+	if caseInsensitive {
+		pattern = "(?i)" + pattern
+	}
+	if wholeWord {
+		pattern = `\b` + pattern + `\b`
+	}
+
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		return fmt.Errorf("grep: invalid pattern: %w", err)
+	}
+
+	grepFile := func(r io.Reader, name string) (matched bool, err error) {
+		sc := bufio.NewScanner(r)
+		lineNum := 0
+		matchCount := 0
+		for sc.Scan() {
+			lineNum++
+			line := sc.Text()
+			match := re.MatchString(line)
+			if invert {
+				match = !match
+			}
+			if match {
+				matched = true
+				matchCount++
+				if listFiles {
+					return true, nil
+				}
+				if countMode {
+					continue
+				}
+				if onlyMatch {
+					locs := re.FindStringIndex(line)
+					if len(locs) > 0 {
+						for _, loc := range re.FindAllStringIndex(line, -1) {
+							prefix := ""
+							if len(files) > 1 || recursive {
+								prefix = name + ":"
+							}
+							if showLineNum {
+								fmt.Fprintf(hc.Stdout, "%s%d:%s\n", prefix, lineNum, line[loc[0]:loc[1]])
+							} else {
+								fmt.Fprintf(hc.Stdout, "%s%s\n", prefix, line[loc[0]:loc[1]])
+							}
+						}
+					}
+					continue
+				}
+				prefix := ""
+				if len(files) > 1 || recursive {
+					prefix = name + ":"
+				}
+				if showLineNum {
+					fmt.Fprintf(hc.Stdout, "%s%d:%s\n", prefix, lineNum, line)
+				} else {
+					fmt.Fprintf(hc.Stdout, "%s%s\n", prefix, line)
+				}
+			}
+		}
+		if countMode && matched {
+			prefix := ""
+			if len(files) > 1 || recursive {
+				prefix = name + ":"
+			}
+			fmt.Fprintf(hc.Stdout, "%s%d\n", prefix, matchCount)
+		}
+		return matched, sc.Err()
+	}
+
+	if len(files) == 0 {
+		matched, err := grepFile(hc.Stdin, "")
+		if err != nil {
+			return err
+		}
+		if !matched && !invert {
+			return interp.ExitStatus(1)
+		}
+		return nil
+	}
+
+	anyMatch := false
+	for _, f := range files {
+		absPath := s.resolvePath(f)
+		info, err := s.fs.Stat(absPath)
+		if err != nil {
+			return fmt.Errorf("grep: %s: %w", f, err)
+		}
+		if info.IsDir() && recursive {
+			err := afero.Walk(s.fs, absPath, func(path string, fi os.FileInfo, err error) error {
+				if err != nil || fi.IsDir() {
+					return err
+				}
+				r, err := s.fs.Open(path)
+				if err != nil {
+					return err
+				}
+				defer r.Close()
+				matched, _ := grepFile(r, path)
+				if matched {
+					anyMatch = true
+				}
+				return nil
+			})
+			if err != nil {
+				return err
+			}
+		} else {
+			r, err := s.fs.Open(absPath)
+			if err != nil {
+				return fmt.Errorf("grep: %s: %w", f, err)
+			}
+			matched, err := grepFile(r, f)
+			r.Close()
+			if err != nil {
+				return err
+			}
+			if matched {
+				anyMatch = true
+			}
+		}
+	}
+
+	if !anyMatch && !invert {
+		return interp.ExitStatus(1)
+	}
+	return nil
+}
+
+func (s *Shell) builtinFind(ctx context.Context, args []string) error {
+	hc := interp.HandlerCtx(ctx)
+	searchPath := s.cwd
+	var namePattern string
+	var fileType string
+	maxDepth := -1
+
+	i := 1
+	for i < len(args) {
+		switch args[i] {
+		case "-name":
+			if i+1 >= len(args) {
+				return fmt.Errorf("find: missing argument to '-name'")
+			}
+			i++
+			namePattern = args[i]
+		case "-type":
+			if i+1 >= len(args) {
+				return fmt.Errorf("find: missing argument to '-type'")
+			}
+			i++
+			fileType = args[i]
+		case "-maxdepth":
+			if i+1 >= len(args) {
+				return fmt.Errorf("find: missing argument to '-maxdepth'")
+			}
+			i++
+			d, err := strconv.Atoi(args[i])
+			if err != nil {
+				return fmt.Errorf("find: invalid argument '%s' to '-maxdepth'", args[i])
+			}
+			maxDepth = d
+		default:
+			if !strings.HasPrefix(args[i], "-") {
+				searchPath = s.resolvePath(args[i])
+			}
+		}
+		i++
+	}
+
+	return afero.Walk(s.fs, searchPath, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
+
+		relPath := path
+		if filepath.IsAbs(searchPath) {
+			relPath, _ = filepath.Rel(searchPath, path)
+		}
+
+		depth := strings.Count(relPath, string(filepath.Separator))
+		if relPath == "." {
+			depth = 0
+		}
+		if maxDepth >= 0 && depth > maxDepth {
+			if info.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
+		if fileType == "f" && info.IsDir() {
+			return nil
+		}
+		if fileType == "d" && !info.IsDir() {
+			return nil
+		}
+
+		if namePattern != "" {
+			matched, _ := filepath.Match(namePattern, filepath.Base(path))
+			if !matched {
+				return nil
+			}
+		}
+
+		fmt.Fprintln(hc.Stdout, path)
+		return nil
+	})
+}
+
+func (s *Shell) builtinSed(ctx context.Context, args []string) error {
+	hc := interp.HandlerCtx(ctx)
+	if len(args) < 2 {
+		return fmt.Errorf("sed: missing expression")
+	}
+
+	expr := args[1]
+	var files []string
+	for _, a := range args[2:] {
+		files = append(files, a)
+	}
+
+	if !strings.HasPrefix(expr, "s") || len(expr) < 3 {
+		return fmt.Errorf("sed: unsupported expression '%s' (only s/// is supported)", expr)
+	}
+
+	sep := expr[1]
+	parts := strings.Split(expr[2:], string(sep))
+	if len(parts) < 2 {
+		return fmt.Errorf("sed: invalid substitution expression")
+	}
+	pattern := parts[0]
+	replacement := parts[1]
+	global := false
+	if len(parts) > 2 && strings.Contains(parts[len(parts)-1], "g") {
+		global = true
+	}
+
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		return fmt.Errorf("sed: invalid pattern: %w", err)
+	}
+
+	lines, err := readLines(s, hc, files)
+	if err != nil {
+		return err
+	}
+
+	for _, line := range lines {
+		if global {
+			fmt.Fprintln(hc.Stdout, re.ReplaceAllString(line, replacement))
+		} else {
+			fmt.Fprintln(hc.Stdout, re.ReplaceAllString(line, replacement))
+		}
+	}
+	return nil
+}
+
+func (s *Shell) builtinRead(ctx context.Context, args []string) error {
+	hc := interp.HandlerCtx(ctx)
+	varNames := args[1:]
+	if len(varNames) == 0 {
+		varNames = []string{"REPLY"}
+	}
+
+	scanner := bufio.NewScanner(hc.Stdin)
+	if !scanner.Scan() {
+		return fmt.Errorf("read: no input")
+	}
+	line := scanner.Text()
+
+	fields := strings.Fields(line)
+	for i, name := range varNames {
+		if i < len(fields) {
+			if i == len(varNames)-1 && len(fields) > len(varNames) {
+				s.env[name] = strings.Join(fields[i:], " ")
+			} else {
+				s.env[name] = fields[i]
+			}
+		} else {
+			s.env[name] = ""
+		}
+	}
+	return nil
+}
+
+func (s *Shell) builtinSeq(ctx context.Context, args []string) error {
+	hc := interp.HandlerCtx(ctx)
+	var start, step, stop int
+	var err error
+
+	switch len(args) {
+	case 1:
+		return nil
+	case 2:
+		start, stop = 1, 0
+		stop, err = strconv.Atoi(args[1])
+		if err != nil {
+			return fmt.Errorf("seq: invalid number '%s'", args[1])
+		}
+	case 3:
+		start, err = strconv.Atoi(args[1])
+		if err != nil {
+			return fmt.Errorf("seq: invalid number '%s'", args[1])
+		}
+		stop, err = strconv.Atoi(args[2])
+		if err != nil {
+			return fmt.Errorf("seq: invalid number '%s'", args[2])
+		}
+	default:
+		start, err = strconv.Atoi(args[1])
+		if err != nil {
+			return fmt.Errorf("seq: invalid number '%s'", args[1])
+		}
+		step, err = strconv.Atoi(args[2])
+		if err != nil || step == 0 {
+			return fmt.Errorf("seq: invalid increment '%s'", args[2])
+		}
+		stop, err = strconv.Atoi(args[3])
+		if err != nil {
+			return fmt.Errorf("seq: invalid number '%s'", args[3])
+		}
+	}
+
+	if step == 0 {
+		if start <= stop {
+			step = 1
+		} else {
+			step = -1
+		}
+	}
+
+	for i := start; ; i += step {
+		fmt.Fprintln(hc.Stdout, i)
+		if (step > 0 && i >= stop) || (step < 0 && i <= stop) {
+			break
+		}
+	}
+	return nil
+}
+
+func (s *Shell) builtinDate(ctx context.Context, args []string) error {
+	hc := interp.HandlerCtx(ctx)
+	format := ""
+	for i := 1; i < len(args); i++ {
+		if args[i] == "+%s" || args[i] == "+%F" || args[i] == "+%T" || args[i] == "+%Y-%m-%d" || args[i] == "+%H:%M:%S" {
+			format = args[i][1:]
+		} else if args[i] == "-u" || args[i] == "--utc" || args[i] == "--universal" {
+		}
+	}
+
+	now := time.Now()
+	if format == "" {
+		fmt.Fprintln(hc.Stdout, now.Format("Mon Jan 2 15:04:05 UTC 2006"))
+	} else {
+		fmt.Fprintln(hc.Stdout, now.Format(format))
+	}
+	return nil
+}
+
+func (s *Shell) builtinSleep(ctx context.Context, args []string) error {
+	if len(args) < 2 {
+		return fmt.Errorf("sleep: missing operand")
+	}
+	d, err := strconv.ParseFloat(args[1], 64)
+	if err != nil {
+		return fmt.Errorf("sleep: invalid time interval '%s'", args[1])
+	}
+	time.Sleep(time.Duration(d * float64(time.Second)))
+	return nil
+}
+
+func (s *Shell) builtinYes(ctx context.Context, args []string) error {
+	hc := interp.HandlerCtx(ctx)
+	msg := "y"
+	if len(args) > 1 {
+		msg = strings.Join(args[1:], " ")
+	}
+	for {
+		fmt.Fprintln(hc.Stdout, msg)
+	}
+}
+
+func (s *Shell) builtinEnv(ctx context.Context, args []string) error {
+	hc := interp.HandlerCtx(ctx)
+	for k, v := range s.env {
+		fmt.Fprintf(hc.Stdout, "%s=%s\n", k, v)
+	}
+	return nil
+}
+
+func (s *Shell) builtinWhich(ctx context.Context, args []string) error {
+	hc := interp.HandlerCtx(ctx)
+	if len(args) < 2 {
+		return nil
+	}
+	for _, name := range args[1:] {
+		if _, ok := builtinHelp[name]; ok {
+			fmt.Fprintf(hc.Stdout, "%s: shell built-in command\n", name)
+			continue
+		}
+		if _, ok := s.builtins[name]; ok {
+			fmt.Fprintf(hc.Stdout, "%s: native plugin\n", name)
+			continue
+		}
+		if _, ok := s.plugins[name]; ok {
+			fmt.Fprintf(hc.Stdout, "%s: WASM plugin\n", name)
+			continue
+		}
+		fmt.Fprintf(hc.Stdout, "%s: not found\n", name)
+	}
+	return nil
+}
+
+func (s *Shell) builtinLn(_ context.Context, args []string) error {
+	var positional []string
+	for _, a := range args[1:] {
+		switch a {
+		case "-s", "--symbolic":
+		case "-f", "--force":
+		default:
+			positional = append(positional, a)
+		}
+	}
+	if len(positional) < 2 {
+		return fmt.Errorf("ln: missing operand")
+	}
+
+	if _, ok := s.fs.(interface {
+		SymlinkIfPossible(oldname, newname string) error
+	}); ok {
+		return fmt.Errorf("ln: symbolic links not supported in virtual filesystem")
+	}
+	return fmt.Errorf("ln: not supported in virtual filesystem")
+}
+
+func (s *Shell) builtinXargs(ctx context.Context, args []string) error {
+	hc := interp.HandlerCtx(ctx)
+	if len(args) < 2 {
+		return fmt.Errorf("xargs: missing command")
+	}
+
+	cmdName := args[1]
+	cmdArgs := args[2:]
+
+	scanner := bufio.NewScanner(hc.Stdin)
+	var items []string
+	for scanner.Scan() {
+		line := scanner.Text()
+		items = append(items, strings.Fields(line)...)
+	}
+	if err := scanner.Err(); err != nil {
+		return err
+	}
+
+	if len(items) == 0 {
+		return nil
+	}
+
+	fullArgs := append([]string{cmdName}, cmdArgs...)
+	fullArgs = append(fullArgs, items...)
+
+	return s.execHandler(interp.DefaultExecHandler(2*time.Second))(ctx, fullArgs)
+}
+
+func (s *Shell) builtinSource(ctx context.Context, args []string) error {
+	if len(args) < 2 {
+		return fmt.Errorf("source: missing file argument")
+	}
+
+	absPath := s.resolvePath(args[1])
+	data, err := afero.ReadFile(s.fs, absPath)
+	if err != nil {
+		return fmt.Errorf("source: %s: %w", args[1], err)
+	}
+
+	return s.Run(ctx, string(data))
+}
+
+func (s *Shell) builtinDu(ctx context.Context, args []string) error {
+	hc := interp.HandlerCtx(ctx)
+	humanReadable := false
+	var targets []string
+
+	for _, a := range args[1:] {
+		switch a {
+		case "-h", "--human-readable":
+			humanReadable = true
+		case "-s", "--summary":
+		default:
+			targets = append(targets, a)
+		}
+	}
+
+	if len(targets) == 0 {
+		targets = []string{s.cwd}
+	}
+
+	formatSize := func(size int64) string {
+		if humanReadable {
+			const (
+				KB = 1024
+				MB = KB * 1024
+				GB = MB * 1024
+			)
+			switch {
+			case size >= GB:
+				return fmt.Sprintf("%.1fG", float64(size)/float64(GB))
+			case size >= MB:
+				return fmt.Sprintf("%.1fM", float64(size)/float64(MB))
+			case size >= KB:
+				return fmt.Sprintf("%.1fK", float64(size)/float64(KB))
+			}
+		}
+		return fmt.Sprintf("%d", size)
+	}
+
+	for _, target := range targets {
+		absPath := s.resolvePath(target)
+		var total int64
+		afero.Walk(s.fs, absPath, func(_ string, info os.FileInfo, err error) error {
+			if err != nil {
+				return err
+			}
+			if !info.IsDir() {
+				total += info.Size()
+			}
+			return nil
+		})
+		fmt.Fprintf(hc.Stdout, "%s\t%s\n", formatSize(total), target)
+	}
+	return nil
+}
+
+func (s *Shell) builtinDf(ctx context.Context, _ []string) error {
+	hc := interp.HandlerCtx(ctx)
+	fmt.Fprintln(hc.Stdout, "Filesystem     1K-blocks    Used Available Use% Mounted on")
+	fmt.Fprintln(hc.Stdout, "memsh               0       0         0    - /")
+	return nil
+}
 
 var builtinHelp = map[string][2]string{
-	"cat":   {"concatenate and print files", "cat <file>..."},
-	"cd":    {"change working directory", "cd [dir]"},
-	"chmod": {"change file permissions", "chmod <octal-mode> <file>..."},
-	"cp":    {"copy files or directories", "cp [-r] <src> <dst>"},
-	"cut":   {"extract fields or characters", "cut -d <delim> -f <fields> [file]\n       cut -c <chars> [file]"},
-	"diff":  {"compare two files line by line", "diff <file1> <file2>"},
-	"echo":  {"print arguments", "echo [arg]..."},
-	"find":  {"search virtual filesystem", "find [path] [-name <glob>] [-type f|d]"},
-	"grep":  {"search file contents for patterns", "grep [-i] [-n] [-v] [-r] <pattern> [file...]"},
-	"head":  {"print first lines of a file", "head [-n N] [file]"},
-	"ls":    {"list directory contents", "ls [path]"},
-	"mkdir": {"create directories", "mkdir <dir>..."},
-	"mv":    {"move or rename files", "mv <src> <dst>"},
-	"pwd":   {"print working directory", "pwd"},
-	"rm":    {"remove files or directories", "rm <path>..."},
-	"sort":  {"sort lines of text", "sort [-r] [-u] [-n] [file]"},
-	"stat":  {"show file status", "stat <file>..."},
-	"tail":  {"print last lines of a file", "tail [-n N] [file]"},
-	"tee":   {"read stdin; write to stdout and files", "tee [-a] [file]..."},
-	"touch": {"create or update file timestamps", "touch <file>..."},
-	"tr":    {"translate or delete characters", "tr [-d] [-s] <set1> [set2]"},
-	"uniq":  {"filter adjacent duplicate lines", "uniq [-c] [-d] [-u] [file]"},
-	"awk":   {"pattern scanning and processing", "awk '<prog>' [file...]\n      awk -f <progfile> [file...]"},
-	"wc":    {"count lines, words, and bytes", "wc [-l] [-w] [-c] [file]"},
+	"cat":    {"concatenate and print files", "cat [file]..."},
+	"cd":     {"change working directory", "cd [dir]"},
+	"chmod":  {"change file permissions", "chmod [-R] <mode> <file>..."},
+	"cp":     {"copy files or directories", "cp [-r] [-v] <src> <dst>"},
+	"cut":    {"extract fields or characters", "cut -d <delim> -f <fields> [file]\n       cut -c <chars> [file]"},
+	"date":   {"print the current date and time", "date [+format]"},
+	"diff":   {"compare two files line by line", "diff [-u] <file1> <file2>"},
+	"du":     {"estimate file space usage", "du [-h] [-s] [path]..."},
+	"df":     {"show filesystem space", "df"},
+	"echo":   {"print arguments", "echo [-n] [-e] [arg]..."},
+	"env":    {"display environment variables", "env"},
+	"find":   {"search virtual filesystem", "find [path] [-name <glob>] [-type f|d] [-maxdepth <n>]"},
+	"grep":   {"search file contents for patterns", "grep [-i] [-n] [-v] [-r] [-c] [-l] [-w] [-E] <pattern> [file...]"},
+	"head":   {"print first lines of a file", "head [-n N] [-c N] [file]"},
+	"ln":     {"create links", "ln [-s] <target> <link>"},
+	"ls":     {"list directory contents", "ls [-l] [-a] [-R] [path]"},
+	"man":    {"show help for commands", "man [command]"},
+	"mkdir":  {"create directories", "mkdir [-p] [-v] [-m mode] <dir>..."},
+	"mv":     {"move or rename files", "mv <src> <dst>"},
+	"printf": {"format and print data", "printf <format> [args...]"},
+	"pwd":    {"print working directory", "pwd"},
+	"read":   {"read a line from stdin", "read [var]..."},
+	"rm":     {"remove files or directories", "rm [-f] [-r] [-v] <path>..."},
+	"rmdir":  {"remove empty directories", "rmdir <dir>..."},
+	"sed":    {"stream editor (substitution)", "sed 's/pattern/replacement/[g]' [file]"},
+	"seq":    {"print a sequence of numbers", "seq [first [increment]] last"},
+	"sleep":  {"delay for a specified time", "sleep <seconds>"},
+	"sort":   {"sort lines of text", "sort [-r] [-u] [-n] [file]"},
+	"source": {"execute commands from a file", "source <file>"},
+	"stat":   {"show file status", "stat <file>..."},
+	"tail":   {"print last lines of a file", "tail [-n N] [-c N] [file]"},
+	"tee":    {"read stdin; write to stdout and files", "tee [-a] [file]..."},
+	"touch":  {"create or update file timestamps", "touch [-c] [-r ref] <file>..."},
+	"tr":     {"translate or delete characters", "tr [-d] [-s] [-c] <set1> [set2]"},
+	"uniq":   {"filter adjacent duplicate lines", "uniq [-c] [-d] [-u] [file]"},
+	"wc":     {"count lines, words, and bytes", "wc [-l] [-w] [-c] [file]..."},
+	"which":  {"locate a command", "which <name>..."},
+	"xargs":  {"build and execute command lines", "xargs <command> [args...]"},
+	"yes":    {"output a string repeatedly", "yes [string]"},
+	"awk":    {"pattern scanning and processing", "awk '<prog>' [file...]\n      awk -f <progfile> [file...]"},
 	"base64": {"encode or decode base64 data", "base64 [-d] [data...]"},
 }
 
@@ -983,7 +2361,6 @@ func (s *Shell) builtinHelp(ctx context.Context, args []string) error {
 		return nil
 	}
 
-	// List all commands
 	names := make([]string, 0, len(builtinHelp))
 	for k := range builtinHelp {
 		names = append(names, k)
@@ -996,10 +2373,6 @@ func (s *Shell) builtinHelp(ctx context.Context, args []string) error {
 	return nil
 }
 
-// ── shared helpers ────────────────────────────────────────────────────────────
-
-// readLines reads lines from the provided files (via virtual FS) or from
-// hc.Stdin if files is empty.
 func readLines(s *Shell, hc interp.HandlerContext, files []string) ([]string, error) {
 	var lines []string
 	if len(files) == 0 {

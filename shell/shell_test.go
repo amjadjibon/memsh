@@ -50,7 +50,7 @@ func TestBuiltins(t *testing.T) {
 
 	tests := []struct {
 		name       string
-		cwdOpt     string         // if non-empty, pass WithCwd (must be a real OS path)
+		cwdOpt     string            // if non-empty, pass WithCwd (must be a real OS path)
 		setup      func(fs afero.Fs) // optional FS pre-seeding
 		script     string
 		wantOut    string // substring that must appear in output
@@ -116,9 +116,9 @@ func TestBuiltins(t *testing.T) {
 			wantErrStr: "No such file or directory",
 		},
 		{
-			name:       "cat with no arguments returns error",
-			script:     "cat",
-			wantErrStr: "missing operand",
+			name:    "cat with no arguments reads from stdin",
+			script:  "cat",
+			wantOut: "",
 		},
 		// ── touch ─────────────────────────────────────────
 		{
@@ -1432,8 +1432,8 @@ func TestPluginInterface(t *testing.T) {
 		if err := s.Run(ctx, "wc -l /lines.txt"); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if got := strings.TrimSpace(buf.String()); got != "3" {
-			t.Errorf("want 3, got %q", got)
+		if got := strings.TrimSpace(buf.String()); got != "3 /lines.txt" {
+			t.Errorf("want '3 /lines.txt', got %q", got)
 		}
 	})
 

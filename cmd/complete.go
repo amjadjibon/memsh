@@ -7,29 +7,24 @@ import (
 	"github.com/amjadjibon/memsh/shell"
 )
 
-// builtinCmds is the fixed set of built-in shell commands.
 var builtinCmds = []string{
-	"cat", "cd", "echo", "exit", "ls", "mkdir", "pwd", "quit", "rm", "touch",
+	"awk", "base64", "cat", "cd", "chmod", "cp", "cut", "date", "diff",
+	"du", "df", "echo", "env", "exit", "find", "grep", "head", "help",
+	"ln", "ls", "man", "mkdir", "mv", "printf", "pwd", "read", "rm",
+	"rmdir", "sed", "seq", "sleep", "sort", "source", "stat", "tail",
+	"tee", "touch", "tr", "uniq", "wc", "which", "xargs", "yes",
 }
 
-// replCompleter implements readline.AutoCompleter for the memsh REPL.
-// First token → command name completion.
-// Subsequent tokens → virtual FS path completion.
 type replCompleter struct {
 	sh *shell.Shell
 }
 
-// Do is called by readline on every Tab press.
-// line is the full input up to the cursor; pos is the cursor position.
-// Returns candidate suffixes and the length of the prefix being replaced.
 func (c *replCompleter) Do(line []rune, pos int) ([][]rune, int) {
 	str := string(line[:pos])
 
-	// Find where the current word starts (after the last unquoted space).
 	wordStart := strings.LastIndexAny(str, " \t") + 1
 	partial := str[wordStart:]
 
-	// Determine if we are completing the command or an argument.
 	isCmd := strings.TrimSpace(str[:wordStart]) == ""
 
 	if isCmd {
@@ -38,7 +33,6 @@ func (c *replCompleter) Do(line []rune, pos int) ([][]rune, int) {
 	return c.completePath(partial)
 }
 
-// allCommands merges built-ins with registered plugin names.
 func (c *replCompleter) allCommands() []string {
 	cmds := make([]string, len(builtinCmds))
 	copy(cmds, builtinCmds)
@@ -47,7 +41,6 @@ func (c *replCompleter) allCommands() []string {
 	return cmds
 }
 
-// completePath completes a partial filesystem path against the virtual FS.
 func (c *replCompleter) completePath(partial string) ([][]rune, int) {
 	dir := c.sh.Cwd()
 	prefix := partial
@@ -69,8 +62,6 @@ func (c *replCompleter) completePath(partial string) ([][]rune, int) {
 	return filterSuffixes(entries, prefix)
 }
 
-// filterSuffixes returns the suffix of each candidate that starts with prefix,
-// along with the rune-length of the prefix to replace.
 func filterSuffixes(candidates []string, prefix string) ([][]rune, int) {
 	var results [][]rune
 	for _, c := range candidates {
