@@ -19,6 +19,8 @@ func defaultNativePlugins() []plugins.Plugin {
 	return []plugins.Plugin{
 		native.Base64Plugin{},
 		native.WcPlugin{},
+		native.GrepPlugin{},
+		native.FindPlugin{},
 	}
 }
 

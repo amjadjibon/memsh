@@ -1,12 +1,15 @@
 package shell
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/amjadjibon/memsh/shell/plugins"
@@ -55,6 +58,14 @@ func (s *Shell) execHandler(next interp.ExecHandlerFunc) interp.ExecHandlerFunc 
 			return s.builtinEcho(ctx, args)
 		case "tee":
 			return s.builtinTee(ctx, args)
+		case "cp":
+			return s.builtinCp(ctx, args)
+		case "mv":
+			return s.builtinMv(ctx, args)
+		case "head":
+			return s.builtinHead(ctx, args)
+		case "tail":
+			return s.builtinTail(ctx, args)
 		default:
 			if fn, ok := s.builtins[args[0]]; ok {
 				return fn(ctx, args)
@@ -205,6 +216,220 @@ func (s *Shell) builtinEcho(ctx context.Context, args []string) error {
 		fmt.Fprint(hc.Stdout, arg)
 	}
 	fmt.Fprintln(hc.Stdout)
+	return nil
+}
+
+func (s *Shell) builtinCp(_ context.Context, args []string) error {
+	recursive := false
+	var positional []string
+	for _, a := range args[1:] {
+		switch a {
+		case "-r", "-R", "--recursive":
+			recursive = true
+		default:
+			positional = append(positional, a)
+		}
+	}
+	if len(positional) < 2 {
+		return fmt.Errorf("cp: missing destination file operand")
+	}
+
+	src := s.resolvePath(positional[0])
+	dst := s.resolvePath(positional[1])
+
+	srcInfo, err := s.fs.Stat(src)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("cp: cannot stat '%s': No such file or directory", positional[0])
+		}
+		return fmt.Errorf("cp: %w", err)
+	}
+
+	if srcInfo.IsDir() {
+		if !recursive {
+			return fmt.Errorf("cp: -r not specified; omitting directory '%s'", positional[0])
+		}
+		dstInfo, err := s.fs.Stat(dst)
+		if err == nil && dstInfo.IsDir() {
+			dst = filepath.Join(dst, filepath.Base(src))
+		}
+		return s.cpDir(src, dst)
+	}
+
+	dstInfo, err := s.fs.Stat(dst)
+	if err == nil && dstInfo.IsDir() {
+		dst = filepath.Join(dst, filepath.Base(src))
+	}
+	return s.cpFile(src, dst)
+}
+
+func (s *Shell) cpFile(src, dst string) error {
+	in, err := s.fs.Open(src)
+	if err != nil {
+		return fmt.Errorf("cp: %w", err)
+	}
+	defer in.Close()
+
+	out, err := s.fs.Create(dst)
+	if err != nil {
+		return fmt.Errorf("cp: %w", err)
+	}
+	defer out.Close()
+
+	_, err = io.Copy(out, in)
+	return err
+}
+
+func (s *Shell) cpDir(src, dst string) error {
+	return afero.Walk(s.fs, src, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, relErr := filepath.Rel(src, path)
+		if relErr != nil {
+			return relErr
+		}
+		target := filepath.Join(dst, rel)
+		if info.IsDir() {
+			return s.fs.MkdirAll(target, 0755)
+		}
+		return s.cpFile(path, target)
+	})
+}
+
+func (s *Shell) builtinMv(_ context.Context, args []string) error {
+	if len(args) < 3 {
+		return fmt.Errorf("mv: missing destination file operand")
+	}
+
+	src := s.resolvePath(args[1])
+	dst := s.resolvePath(args[2])
+
+	dstInfo, err := s.fs.Stat(dst)
+	if err == nil && dstInfo.IsDir() {
+		dst = filepath.Join(dst, filepath.Base(src))
+	}
+
+	if err := s.fs.Rename(src, dst); err != nil {
+		return fmt.Errorf("mv: cannot move '%s' to '%s': %w", args[1], args[2], err)
+	}
+	return nil
+}
+
+func (s *Shell) builtinHead(ctx context.Context, args []string) error {
+	hc := interp.HandlerCtx(ctx)
+	n := 10
+	var files []string
+
+	for i := 1; i < len(args); i++ {
+		a := args[i]
+		if a == "-n" {
+			if i+1 >= len(args) {
+				return fmt.Errorf("head: option requires an argument -- 'n'")
+			}
+			i++
+			v, err := strconv.Atoi(args[i])
+			if err != nil || v < 0 {
+				return fmt.Errorf("head: invalid number of lines: '%s'", args[i])
+			}
+			n = v
+		} else if strings.HasPrefix(a, "-n") {
+			v, err := strconv.Atoi(a[2:])
+			if err != nil || v < 0 {
+				return fmt.Errorf("head: invalid number of lines: '%s'", a[2:])
+			}
+			n = v
+		} else {
+			files = append(files, a)
+		}
+	}
+
+	if len(files) == 0 {
+		return headLines(hc.Stdin, hc.Stdout, n)
+	}
+	for _, f := range files {
+		r, err := s.fs.Open(s.resolvePath(f))
+		if err != nil {
+			return fmt.Errorf("head: %s: %w", f, err)
+		}
+		err = headLines(r, hc.Stdout, n)
+		r.Close()
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func headLines(r io.Reader, w io.Writer, n int) error {
+	sc := bufio.NewScanner(r)
+	for i := 0; i < n && sc.Scan(); i++ {
+		fmt.Fprintln(w, sc.Text())
+	}
+	return sc.Err()
+}
+
+func (s *Shell) builtinTail(ctx context.Context, args []string) error {
+	hc := interp.HandlerCtx(ctx)
+	n := 10
+	var files []string
+
+	for i := 1; i < len(args); i++ {
+		a := args[i]
+		if a == "-n" {
+			if i+1 >= len(args) {
+				return fmt.Errorf("tail: option requires an argument -- 'n'")
+			}
+			i++
+			v, err := strconv.Atoi(args[i])
+			if err != nil || v < 0 {
+				return fmt.Errorf("tail: invalid number of lines: '%s'", args[i])
+			}
+			n = v
+		} else if strings.HasPrefix(a, "-n") {
+			v, err := strconv.Atoi(a[2:])
+			if err != nil || v < 0 {
+				return fmt.Errorf("tail: invalid number of lines: '%s'", a[2:])
+			}
+			n = v
+		} else {
+			files = append(files, a)
+		}
+	}
+
+	if len(files) == 0 {
+		return tailLines(hc.Stdin, hc.Stdout, n)
+	}
+	for _, f := range files {
+		r, err := s.fs.Open(s.resolvePath(f))
+		if err != nil {
+			return fmt.Errorf("tail: %s: %w", f, err)
+		}
+		err = tailLines(r, hc.Stdout, n)
+		r.Close()
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func tailLines(r io.Reader, w io.Writer, n int) error {
+	sc := bufio.NewScanner(r)
+	var lines []string
+	for sc.Scan() {
+		lines = append(lines, sc.Text())
+	}
+	if err := sc.Err(); err != nil {
+		return err
+	}
+	start := len(lines) - n
+	if start < 0 {
+		start = 0
+	}
+	for _, line := range lines[start:] {
+		fmt.Fprintln(w, line)
+	}
 	return nil
 }
 

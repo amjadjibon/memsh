@@ -678,6 +678,393 @@ func TestMultipleCommands(t *testing.T) {
 }
 
 // ──────────────────────────────────────────────
+// 9. cp and mv
+// ──────────────────────────────────────────────
+
+func TestCpMv(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("cp copies file content", func(t *testing.T) {
+		fs := afero.NewMemMapFs()
+		afero.WriteFile(fs, "/src.txt", []byte("hello"), 0644)
+		var buf bytes.Buffer
+		s := newTestShell(t, &buf, shell.WithFS(fs))
+
+		if err := s.Run(ctx, "cp /src.txt /dst.txt"); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		got, err := afero.ReadFile(fs, "/dst.txt")
+		if err != nil {
+			t.Fatalf("ReadFile /dst.txt: %v", err)
+		}
+		if string(got) != "hello" {
+			t.Errorf("want 'hello', got %q", string(got))
+		}
+	})
+
+	t.Run("cp into existing directory places file inside", func(t *testing.T) {
+		fs := afero.NewMemMapFs()
+		afero.WriteFile(fs, "/f.txt", []byte("data"), 0644)
+		fs.MkdirAll("/dir", 0755)
+		var buf bytes.Buffer
+		s := newTestShell(t, &buf, shell.WithFS(fs))
+
+		if err := s.Run(ctx, "cp /f.txt /dir"); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		exists, _ := afero.Exists(fs, "/dir/f.txt")
+		if !exists {
+			t.Error("expected /dir/f.txt to exist")
+		}
+	})
+
+	t.Run("cp -r copies directory recursively", func(t *testing.T) {
+		fs := afero.NewMemMapFs()
+		fs.MkdirAll("/a", 0755)
+		afero.WriteFile(fs, "/a/x.txt", []byte("x"), 0644)
+		afero.WriteFile(fs, "/a/y.txt", []byte("y"), 0644)
+		var buf bytes.Buffer
+		s := newTestShell(t, &buf, shell.WithFS(fs))
+
+		if err := s.Run(ctx, "cp -r /a /b"); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		got, err := afero.ReadFile(fs, "/b/x.txt")
+		if err != nil {
+			t.Fatalf("ReadFile /b/x.txt: %v", err)
+		}
+		if string(got) != "x" {
+			t.Errorf("want 'x', got %q", string(got))
+		}
+	})
+
+	t.Run("cp directory without -r returns error", func(t *testing.T) {
+		fs := afero.NewMemMapFs()
+		fs.MkdirAll("/mydir", 0755)
+		var buf bytes.Buffer
+		s := newTestShell(t, &buf, shell.WithFS(fs))
+
+		err := s.Run(ctx, "cp /mydir /other")
+		if err == nil || !strings.Contains(err.Error(), "-r not specified") {
+			t.Errorf("expected -r error, got %v", err)
+		}
+	})
+
+	t.Run("cp missing source returns error", func(t *testing.T) {
+		fs := afero.NewMemMapFs()
+		var buf bytes.Buffer
+		s := newTestShell(t, &buf, shell.WithFS(fs))
+
+		err := s.Run(ctx, "cp /nosuchfile /dst")
+		if err == nil || !strings.Contains(err.Error(), "No such file or directory") {
+			t.Errorf("expected not-found error, got %v", err)
+		}
+	})
+
+	t.Run("mv renames file", func(t *testing.T) {
+		fs := afero.NewMemMapFs()
+		afero.WriteFile(fs, "/old.txt", []byte("content"), 0644)
+		var buf bytes.Buffer
+		s := newTestShell(t, &buf, shell.WithFS(fs))
+
+		if err := s.Run(ctx, "mv /old.txt /new.txt"); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		exists, _ := afero.Exists(fs, "/old.txt")
+		if exists {
+			t.Error("expected /old.txt to be gone after mv")
+		}
+		got, err := afero.ReadFile(fs, "/new.txt")
+		if err != nil {
+			t.Fatalf("ReadFile /new.txt: %v", err)
+		}
+		if string(got) != "content" {
+			t.Errorf("want 'content', got %q", string(got))
+		}
+	})
+
+	t.Run("mv into existing directory moves file inside", func(t *testing.T) {
+		fs := afero.NewMemMapFs()
+		afero.WriteFile(fs, "/f.txt", []byte("hi"), 0644)
+		fs.MkdirAll("/dir", 0755)
+		var buf bytes.Buffer
+		s := newTestShell(t, &buf, shell.WithFS(fs))
+
+		if err := s.Run(ctx, "mv /f.txt /dir"); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		exists, _ := afero.Exists(fs, "/dir/f.txt")
+		if !exists {
+			t.Error("expected /dir/f.txt to exist after mv")
+		}
+	})
+}
+
+// ──────────────────────────────────────────────
+// 10. head and tail
+// ──────────────────────────────────────────────
+
+func TestHeadTail(t *testing.T) {
+	ctx := context.Background()
+	content := "line1\nline2\nline3\nline4\nline5\n"
+
+	t.Run("head prints first 10 lines by default", func(t *testing.T) {
+		fs := afero.NewMemMapFs()
+		afero.WriteFile(fs, "/f.txt", []byte(content), 0644)
+		var buf bytes.Buffer
+		s := newTestShell(t, &buf, shell.WithFS(fs))
+
+		if err := s.Run(ctx, "head /f.txt"); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !strings.Contains(buf.String(), "line1") {
+			t.Errorf("output %q does not contain 'line1'", buf.String())
+		}
+	})
+
+	t.Run("head -n 2 prints first 2 lines", func(t *testing.T) {
+		fs := afero.NewMemMapFs()
+		afero.WriteFile(fs, "/f.txt", []byte(content), 0644)
+		var buf bytes.Buffer
+		s := newTestShell(t, &buf, shell.WithFS(fs))
+
+		if err := s.Run(ctx, "head -n 2 /f.txt"); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		out := buf.String()
+		if !strings.Contains(out, "line1") || !strings.Contains(out, "line2") {
+			t.Errorf("output %q missing line1 or line2", out)
+		}
+		if strings.Contains(out, "line3") {
+			t.Errorf("output %q should not contain line3", out)
+		}
+	})
+
+	t.Run("tail -n 2 prints last 2 lines", func(t *testing.T) {
+		fs := afero.NewMemMapFs()
+		afero.WriteFile(fs, "/f.txt", []byte(content), 0644)
+		var buf bytes.Buffer
+		s := newTestShell(t, &buf, shell.WithFS(fs))
+
+		if err := s.Run(ctx, "tail -n 2 /f.txt"); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		out := buf.String()
+		if !strings.Contains(out, "line4") || !strings.Contains(out, "line5") {
+			t.Errorf("output %q missing line4 or line5", out)
+		}
+		if strings.Contains(out, "line1") {
+			t.Errorf("output %q should not contain line1", out)
+		}
+	})
+
+	t.Run("tail prints last 10 lines by default", func(t *testing.T) {
+		fs := afero.NewMemMapFs()
+		afero.WriteFile(fs, "/f.txt", []byte(content), 0644)
+		var buf bytes.Buffer
+		s := newTestShell(t, &buf, shell.WithFS(fs))
+
+		if err := s.Run(ctx, "tail /f.txt"); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !strings.Contains(buf.String(), "line5") {
+			t.Errorf("output %q does not contain 'line5'", buf.String())
+		}
+	})
+
+	t.Run("head missing file returns error", func(t *testing.T) {
+		fs := afero.NewMemMapFs()
+		var buf bytes.Buffer
+		s := newTestShell(t, &buf, shell.WithFS(fs))
+
+		err := s.Run(ctx, "head /nosuchfile.txt")
+		if err == nil {
+			t.Fatal("expected error for missing file")
+		}
+	})
+}
+
+// ──────────────────────────────────────────────
+// 11. grep and find (native plugins)
+// ──────────────────────────────────────────────
+
+func TestGrep(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("grep matches lines in file", func(t *testing.T) {
+		fs := afero.NewMemMapFs()
+		afero.WriteFile(fs, "/f.txt", []byte("apple\nbanana\napricot\n"), 0644)
+		var buf bytes.Buffer
+		s := newTestShell(t, &buf, shell.WithFS(fs))
+
+		if err := s.Run(ctx, "grep apple /f.txt"); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		out := buf.String()
+		if !strings.Contains(out, "apple") {
+			t.Errorf("output %q does not contain 'apple'", out)
+		}
+		if strings.Contains(out, "banana") {
+			t.Errorf("output %q should not contain 'banana'", out)
+		}
+	})
+
+	t.Run("grep -i does case-insensitive match", func(t *testing.T) {
+		fs := afero.NewMemMapFs()
+		afero.WriteFile(fs, "/f.txt", []byte("Hello\nworld\n"), 0644)
+		var buf bytes.Buffer
+		s := newTestShell(t, &buf, shell.WithFS(fs))
+
+		if err := s.Run(ctx, "grep -i hello /f.txt"); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !strings.Contains(buf.String(), "Hello") {
+			t.Errorf("output %q does not contain 'Hello'", buf.String())
+		}
+	})
+
+	t.Run("grep -v inverts match", func(t *testing.T) {
+		fs := afero.NewMemMapFs()
+		afero.WriteFile(fs, "/f.txt", []byte("keep\nskip\nkeep2\n"), 0644)
+		var buf bytes.Buffer
+		s := newTestShell(t, &buf, shell.WithFS(fs))
+
+		if err := s.Run(ctx, "grep -v skip /f.txt"); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		out := buf.String()
+		if strings.Contains(out, "skip") {
+			t.Errorf("output %q should not contain 'skip'", out)
+		}
+		if !strings.Contains(out, "keep") {
+			t.Errorf("output %q should contain 'keep'", out)
+		}
+	})
+
+	t.Run("grep -n shows line numbers", func(t *testing.T) {
+		fs := afero.NewMemMapFs()
+		afero.WriteFile(fs, "/f.txt", []byte("foo\nbar\nfoo2\n"), 0644)
+		var buf bytes.Buffer
+		s := newTestShell(t, &buf, shell.WithFS(fs))
+
+		if err := s.Run(ctx, "grep -n foo /f.txt"); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		out := buf.String()
+		if !strings.Contains(out, "1:") {
+			t.Errorf("output %q should contain line number '1:'", out)
+		}
+	})
+
+	t.Run("grep no match returns non-nil error", func(t *testing.T) {
+		fs := afero.NewMemMapFs()
+		afero.WriteFile(fs, "/f.txt", []byte("hello\n"), 0644)
+		var buf bytes.Buffer
+		s := newTestShell(t, &buf, shell.WithFS(fs))
+
+		err := s.Run(ctx, "grep nomatch /f.txt")
+		if err == nil {
+			t.Fatal("expected non-nil error for no matches (exit status 1)")
+		}
+	})
+
+	t.Run("grep stdin via pipe", func(t *testing.T) {
+		fs := afero.NewMemMapFs()
+		var buf bytes.Buffer
+		s := newTestShell(t, &buf, shell.WithFS(fs))
+
+		if err := s.Run(ctx, `echo "hello world" | grep hello`); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !strings.Contains(buf.String(), "hello") {
+			t.Errorf("output %q does not contain 'hello'", buf.String())
+		}
+	})
+}
+
+func TestFind(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("find lists all entries under path", func(t *testing.T) {
+		fs := afero.NewMemMapFs()
+		fs.MkdirAll("/d", 0755)
+		afero.WriteFile(fs, "/d/a.txt", []byte(""), 0644)
+		afero.WriteFile(fs, "/d/b.go", []byte(""), 0644)
+		var buf bytes.Buffer
+		s := newTestShell(t, &buf, shell.WithFS(fs))
+
+		if err := s.Run(ctx, "find /d"); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		out := buf.String()
+		if !strings.Contains(out, "a.txt") {
+			t.Errorf("output %q does not contain 'a.txt'", out)
+		}
+		if !strings.Contains(out, "b.go") {
+			t.Errorf("output %q does not contain 'b.go'", out)
+		}
+	})
+
+	t.Run("find -name filters by glob", func(t *testing.T) {
+		fs := afero.NewMemMapFs()
+		fs.MkdirAll("/d", 0755)
+		afero.WriteFile(fs, "/d/a.txt", []byte(""), 0644)
+		afero.WriteFile(fs, "/d/b.go", []byte(""), 0644)
+		var buf bytes.Buffer
+		s := newTestShell(t, &buf, shell.WithFS(fs))
+
+		if err := s.Run(ctx, "find /d -name *.txt"); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		out := buf.String()
+		if !strings.Contains(out, "a.txt") {
+			t.Errorf("output %q does not contain 'a.txt'", out)
+		}
+		if strings.Contains(out, "b.go") {
+			t.Errorf("output %q should not contain 'b.go'", out)
+		}
+	})
+
+	t.Run("find -type f lists only files", func(t *testing.T) {
+		fs := afero.NewMemMapFs()
+		fs.MkdirAll("/d/sub", 0755)
+		afero.WriteFile(fs, "/d/f.txt", []byte(""), 0644)
+		var buf bytes.Buffer
+		s := newTestShell(t, &buf, shell.WithFS(fs))
+
+		if err := s.Run(ctx, "find /d -type f"); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		out := buf.String()
+		if !strings.Contains(out, "f.txt") {
+			t.Errorf("output %q does not contain 'f.txt'", out)
+		}
+		if strings.Contains(out, "sub") {
+			t.Errorf("output %q should not contain directory 'sub'", out)
+		}
+	})
+
+	t.Run("find -type d lists only directories", func(t *testing.T) {
+		fs := afero.NewMemMapFs()
+		fs.MkdirAll("/d/sub", 0755)
+		afero.WriteFile(fs, "/d/f.txt", []byte(""), 0644)
+		var buf bytes.Buffer
+		s := newTestShell(t, &buf, shell.WithFS(fs))
+
+		if err := s.Run(ctx, "find /d -type d"); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		out := buf.String()
+		if strings.Contains(out, "f.txt") {
+			t.Errorf("output %q should not contain file 'f.txt'", out)
+		}
+		if !strings.Contains(out, "sub") {
+			t.Errorf("output %q should contain directory 'sub'", out)
+		}
+	})
+}
+
+// ──────────────────────────────────────────────
 // Plugin interface tests
 // ──────────────────────────────────────────────
 
