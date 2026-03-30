@@ -94,19 +94,21 @@ func New(opts ...Option) (*Shell, error) {
 			return nil, err
 		}
 
-		// Create a shared wazero runtime and pre-compile all WASM plugins.
-		// Compiling bytecode once at startup is much cheaper than per-invocation.
-		initCtx := context.Background()
-		s.rt = wazero.NewRuntime(initCtx)
-		wasi_snapshot_preview1.MustInstantiate(initCtx, s.rt)
+		// Only pay the wazero startup cost when there are WASM plugins to run.
+		// No plugins → skip runtime init entirely (fast startup).
+		if len(s.plugins) > 0 {
+			initCtx := context.Background()
+			s.rt = wazero.NewRuntime(initCtx)
+			wasi_snapshot_preview1.MustInstantiate(initCtx, s.rt)
 
-		for name, wasm := range s.plugins {
-			cm, err := s.rt.CompileModule(initCtx, wasm)
-			if err != nil {
-				_ = s.rt.Close(initCtx)
-				return nil, fmt.Errorf("plugin %s: compile: %w", name, err)
+			for name, wasm := range s.plugins {
+				cm, err := s.rt.CompileModule(initCtx, wasm)
+				if err != nil {
+					_ = s.rt.Close(initCtx)
+					return nil, fmt.Errorf("plugin %s: compile: %w", name, err)
+				}
+				s.compiled[name] = cm
 			}
-			s.compiled[name] = cm
 		}
 	}
 
