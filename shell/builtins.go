@@ -7,19 +7,116 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/amjadjibon/memsh/shell/plugins"
 	"github.com/spf13/afero"
+	"golang.org/x/term"
 	"mvdan.cc/sh/v3/interp"
 )
 
 var ErrExit = errors.New("exit")
+
+// contextReader wraps an io.Reader to respect context cancellation
+type contextReader struct {
+	ctx context.Context
+	r   io.Reader
+}
+
+func (cr *contextReader) Read(p []byte) (int, error) {
+	select {
+	case <-cr.ctx.Done():
+		return 0, cr.ctx.Err()
+	default:
+		return cr.r.Read(p)
+	}
+}
+
+// copyWithContext copies from src to dst while respecting context cancellation
+// For terminals, it sets up a special signal handler to detect Ctrl+C quickly
+func copyWithContext(ctx context.Context, dst io.Writer, src io.Reader) (int64, error) {
+	// Check if src is a terminal
+	isTerminal := false
+	if f, ok := src.(*os.File); ok {
+		isTerminal = term.IsTerminal(int(f.Fd()))
+	}
+
+	if !isTerminal {
+		// For non-terminal input, use standard copy with chunking
+		buf := make([]byte, 32*1024)
+		var written int64
+		for {
+			select {
+			case <-ctx.Done():
+				return written, ctx.Err()
+			default:
+			}
+
+			nr, err := src.Read(buf)
+			if nr > 0 {
+				nw, errw := dst.Write(buf[0:nr])
+				if nw > 0 {
+					written += int64(nw)
+				}
+				if errw != nil {
+					return written, errw
+				}
+				if nr != nw {
+					return written, io.ErrShortWrite
+				}
+			}
+			if err != nil {
+				if err == io.EOF {
+					return written, nil
+				}
+				return written, err
+			}
+		}
+	}
+
+	// For terminal input, use goroutine with signal handling for better Ctrl+C response
+	type result struct {
+		n   int64
+		err error
+	}
+
+	resCh := make(chan result, 1)
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT)
+
+	// Copy in a goroutine
+	go func() {
+		n, err := io.Copy(dst, src)
+		resCh <- result{n, err}
+	}()
+
+	// Wait for copy to complete or context/signal to cancel
+	select {
+	case res := <-resCh:
+		signal.Stop(sigCh)
+		return res.n, res.err
+	case <-sigCh:
+		// SIGINT received - cancel and return
+		signal.Stop(sigCh)
+		return 0, nil
+	case <-ctx.Done():
+		signal.Stop(sigCh)
+		return 0, ctx.Err()
+	}
+}
+
+// scanWithContext creates a context-aware buffered scanner
+func scanWithContext(ctx context.Context, r io.Reader) *bufio.Scanner {
+	cr := &contextReader{ctx: ctx, r: r}
+	return bufio.NewScanner(cr)
+}
 
 func (s *Shell) execHandler(next interp.ExecHandlerFunc) interp.ExecHandlerFunc {
 	return func(ctx context.Context, args []string) error {
@@ -457,13 +554,19 @@ func (s *Shell) builtinLs(ctx context.Context, args []string) error {
 func (s *Shell) builtinCat(ctx context.Context, args []string) error {
 	hc := interp.HandlerCtx(ctx)
 	if len(args) < 2 {
-		_, err := io.Copy(hc.Stdout, hc.Stdin)
+		// Read from stdin with context awareness for Ctrl+C support
+		_, err := copyWithContext(ctx, hc.Stdout, hc.Stdin)
+		if ctx.Err() != nil {
+			// Context was cancelled (Ctrl+C), don't return an error
+			return nil
+		}
 		return err
 	}
 	for _, target := range args[1:] {
 		if target == "-" {
-			_, err := io.Copy(hc.Stdout, hc.Stdin)
-			if err != nil {
+			_, err := copyWithContext(ctx, hc.Stdout, hc.Stdin)
+			if err != nil && ctx.Err() == nil {
+				// Only return error if not a context cancellation
 				return err
 			}
 			continue
@@ -1032,7 +1135,10 @@ func (s *Shell) builtinTee(ctx context.Context, args []string) error {
 		}
 	}()
 
-	_, err := io.Copy(io.MultiWriter(writers...), hc.Stdin)
+	_, err := copyWithContext(ctx, io.MultiWriter(writers...), hc.Stdin)
+	if ctx.Err() != nil {
+		return nil
+	}
 	return err
 }
 
@@ -2028,8 +2134,11 @@ func (s *Shell) builtinRead(ctx context.Context, args []string) error {
 		varNames = []string{"REPLY"}
 	}
 
-	scanner := bufio.NewScanner(hc.Stdin)
+	scanner := scanWithContext(ctx, hc.Stdin)
 	if !scanner.Scan() {
+		if ctx.Err() != nil {
+			return nil // Context cancelled, no error
+		}
 		return fmt.Errorf("read: no input")
 	}
 	line := scanner.Text()
@@ -2208,13 +2317,16 @@ func (s *Shell) builtinXargs(ctx context.Context, args []string) error {
 	cmdName := args[1]
 	cmdArgs := args[2:]
 
-	scanner := bufio.NewScanner(hc.Stdin)
+	scanner := scanWithContext(ctx, hc.Stdin)
 	var items []string
 	for scanner.Scan() {
 		line := scanner.Text()
 		items = append(items, strings.Fields(line)...)
 	}
 	if err := scanner.Err(); err != nil {
+		if ctx.Err() != nil {
+			return nil // Context cancelled, no error
+		}
 		return err
 	}
 
@@ -2376,7 +2488,7 @@ func (s *Shell) builtinHelp(ctx context.Context, args []string) error {
 func readLines(s *Shell, hc interp.HandlerContext, files []string) ([]string, error) {
 	var lines []string
 	if len(files) == 0 {
-		sc := bufio.NewScanner(hc.Stdin)
+		sc := scanWithContext(context.Background(), hc.Stdin)
 		for sc.Scan() {
 			lines = append(lines, sc.Text())
 		}

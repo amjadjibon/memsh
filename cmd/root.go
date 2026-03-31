@@ -7,9 +7,11 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"runtime/debug"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/chzyer/readline"
@@ -83,6 +85,16 @@ var rootCmd = &cobra.Command{
 		}
 
 		if !term.IsTerminal(int(os.Stdin.Fd())) {
+			if execCommand != "" {
+				// When -c is used with piped input, run the command with stdin intact
+				if debugMode {
+					fmt.Fprintf(os.Stderr, "memsh: executing with piped input: %s\n", execCommand)
+				}
+				if err := sh.Run(ctx, execCommand); err != nil && !errors.Is(err, shell.ErrExit) {
+					return err
+				}
+				return nil
+			}
 			return runPiped(ctx, sh, os.Stdin)
 		}
 
@@ -121,9 +133,6 @@ func runInteractive(ctx context.Context, sh *shell.Shell) error {
 
 		line, err := rl.Readline()
 		if err == readline.ErrInterrupt {
-			if len(line) == 0 {
-				break
-			}
 			inMultiline = false
 			multiline.Reset()
 			continue
@@ -156,7 +165,7 @@ func runInteractive(ctx context.Context, sh *shell.Shell) error {
 			if debugMode {
 				fmt.Fprintf(os.Stderr, "memsh: executing multiline script\n")
 			}
-			if err := sh.Run(ctx, script); err != nil {
+			if err := runWithSignal(ctx, sh, script); err != nil {
 				if errors.Is(err, shell.ErrExit) {
 					break
 				}
@@ -173,7 +182,7 @@ func runInteractive(ctx context.Context, sh *shell.Shell) error {
 		if debugMode {
 			fmt.Fprintf(os.Stderr, "memsh: executing: %s\n", line)
 		}
-		if err := sh.Run(ctx, line); err != nil {
+		if err := runWithSignal(ctx, sh, line); err != nil {
 			if errors.Is(err, shell.ErrExit) {
 				break
 			}
@@ -226,6 +235,29 @@ func loadMemshrc(sh *shell.Shell, ctx context.Context) {
 	}
 	if err := sh.Run(ctx, string(data)); err != nil {
 		fmt.Fprintf(os.Stderr, "memsh: %s: %v\n", rcPath, err)
+	}
+}
+
+func runWithSignal(parent context.Context, sh *shell.Shell, script string) error {
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT)
+	defer signal.Stop(sigCh)
+
+	ctx, cancel := context.WithCancel(parent)
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- sh.Run(ctx, script)
+	}()
+
+	select {
+	case err := <-done:
+		return err
+	case <-sigCh:
+		cancel()
+		<-done
+		return nil
 	}
 }
 
