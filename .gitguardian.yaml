@@ -1,0 +1,12 @@
+# GitGuardian configuration for memsh project
+# This file helps prevent false positives for demo/example scripts
+
+# Ignore these demo scripts that contain fake/example credentials
+paths:
+  - scripts/secret-vault.sh
+  - scripts/config-manager.sh
+
+# Ignore patterns that start with EXAMPLE_ (demo credentials)
+secrets:
+  - pattern: "EXAMPLE_.*"
+    description: "Demo/example credentials"
