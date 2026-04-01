@@ -24,6 +24,8 @@ func defaultNativePlugins() []plugins.Plugin {
 		native.AwkPlugin{},
 		native.LuaPlugin{},
 		native.GojaPlugin{},
+		native.JqPlugin{},
+		native.YqPlugin{},
 	}
 }
 
