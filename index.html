@@ -1,0 +1,1062 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>memsh — hermetic shell runtime</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,300;0,400;0,700;1,300&family=Syne:wght@400;700;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --black: #080a0c;
+    --surface: #0d1117;
+    --surface2: #131920;
+    --border: #1e2d3d;
+    --green: #00ff88;
+    --green-dim: #00ff8840;
+    --green-glow: #00ff8815;
+    --amber: #ffb800;
+    --amber-dim: #ffb80030;
+    --red: #ff4444;
+    --blue: #4488ff;
+    --text: #c8d6e5;
+    --text-dim: #5a6a7a;
+    --text-muted: #2a3a4a;
+    --mono: 'JetBrains Mono', monospace;
+    --sans: 'Syne', sans-serif;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    background: var(--black);
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 14px;
+    line-height: 1.7;
+    overflow-x: hidden;
+  }
+
+  /* noise overlay */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.04'/%3E%3C/svg%3E");
+    pointer-events: none;
+    z-index: 1000;
+    opacity: 0.4;
+  }
+
+  /* scanlines */
+  body::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0,0,0,0.03) 2px,
+      rgba(0,0,0,0.03) 4px
+    );
+    pointer-events: none;
+    z-index: 999;
+  }
+
+  a { color: var(--green); text-decoration: none; }
+
+  /* ── NAV ── */
+  nav {
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 1.2rem 3rem;
+    border-bottom: 1px solid var(--border);
+    background: rgba(8,10,12,0.85);
+    backdrop-filter: blur(12px);
+  }
+
+  .nav-logo {
+    font-family: var(--sans);
+    font-weight: 800;
+    font-size: 1.2rem;
+    color: #fff;
+    letter-spacing: -0.02em;
+  }
+
+  .nav-logo span { color: var(--green); }
+
+  .nav-links {
+    display: flex;
+    gap: 2.5rem;
+    list-style: none;
+    font-size: 0.8rem;
+    color: var(--text-dim);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .nav-links a { color: var(--text-dim); transition: color 0.2s; }
+  .nav-links a:hover { color: var(--green); }
+
+  .nav-cta {
+    font-size: 0.8rem;
+    padding: 0.5rem 1.2rem;
+    border: 1px solid var(--green);
+    color: var(--green);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    transition: background 0.2s, color 0.2s;
+  }
+  .nav-cta:hover { background: var(--green); color: var(--black); }
+
+  /* ── HERO ── */
+  .hero {
+    min-height: 100vh;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 4rem;
+    align-items: center;
+    padding: 8rem 3rem 4rem;
+    max-width: 1400px;
+    margin: 0 auto;
+  }
+
+  .hero-left { position: relative; }
+
+  .hero-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.7rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--green);
+    border: 1px solid var(--green-dim);
+    padding: 0.3rem 0.8rem;
+    margin-bottom: 2rem;
+    animation: fadeUp 0.6s ease both;
+  }
+
+  .hero-badge::before {
+    content: '';
+    width: 6px; height: 6px;
+    background: var(--green);
+    border-radius: 50%;
+    animation: pulse 2s infinite;
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+  }
+
+  .hero-title {
+    font-family: var(--sans);
+    font-size: clamp(3rem, 6vw, 5.5rem);
+    font-weight: 800;
+    line-height: 0.95;
+    letter-spacing: -0.03em;
+    color: #fff;
+    margin-bottom: 1.5rem;
+    animation: fadeUp 0.6s 0.1s ease both;
+  }
+
+  .hero-title .accent { color: var(--green); }
+  .hero-title .dim { color: var(--text-dim); }
+
+  .hero-sub {
+    font-size: 1rem;
+    color: var(--text-dim);
+    line-height: 1.8;
+    max-width: 480px;
+    margin-bottom: 2.5rem;
+    animation: fadeUp 0.6s 0.2s ease both;
+  }
+
+  .hero-sub strong { color: var(--text); font-weight: 400; }
+
+  .hero-actions {
+    display: flex;
+    gap: 1rem;
+    flex-wrap: wrap;
+    animation: fadeUp 0.6s 0.3s ease both;
+  }
+
+  .btn-primary {
+    font-family: var(--mono);
+    font-size: 0.85rem;
+    padding: 0.8rem 2rem;
+    background: var(--green);
+    color: var(--black);
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: transform 0.15s, box-shadow 0.15s;
+    border: none;
+  }
+  .btn-primary:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 30px var(--green-dim);
+    color: var(--black);
+  }
+
+  .btn-ghost {
+    font-family: var(--mono);
+    font-size: 0.85rem;
+    padding: 0.8rem 2rem;
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    transition: border-color 0.2s, color 0.2s;
+  }
+  .btn-ghost:hover { border-color: var(--text-dim); color: var(--text); }
+
+  .hero-stats {
+    display: flex;
+    gap: 2.5rem;
+    margin-top: 3rem;
+    padding-top: 2rem;
+    border-top: 1px solid var(--border);
+    animation: fadeUp 0.6s 0.4s ease both;
+  }
+
+  .stat-val {
+    font-family: var(--sans);
+    font-size: 1.8rem;
+    font-weight: 800;
+    color: #fff;
+    line-height: 1;
+  }
+
+  .stat-val span { color: var(--green); }
+  .stat-label { font-size: 0.7rem; color: var(--text-dim); letter-spacing: 0.08em; text-transform: uppercase; margin-top: 0.3rem; }
+
+  /* ── TERMINAL ── */
+  .hero-right {
+    animation: fadeUp 0.6s 0.2s ease both;
+  }
+
+  .terminal {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    position: relative;
+    overflow: hidden;
+  }
+
+  .terminal::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(135deg, var(--green-glow) 0%, transparent 60%);
+    pointer-events: none;
+  }
+
+  .term-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.8rem 1rem;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface2);
+  }
+
+  .term-dot {
+    width: 10px; height: 10px;
+    border-radius: 50%;
+  }
+  .term-dot.red { background: #ff5f57; }
+  .term-dot.amber { background: #ffbd2e; }
+  .term-dot.green { background: #28ca42; }
+
+  .term-title {
+    flex: 1;
+    text-align: center;
+    font-size: 0.72rem;
+    color: var(--text-dim);
+    letter-spacing: 0.06em;
+  }
+
+  .term-body {
+    padding: 1.5rem;
+    font-size: 0.82rem;
+    line-height: 1.9;
+    min-height: 420px;
+  }
+
+  .t-prompt { color: var(--green); }
+  .t-cmd { color: #fff; }
+  .t-flag { color: var(--amber); }
+  .t-path { color: var(--blue); }
+  .t-out { color: var(--text-dim); }
+  .t-out-green { color: var(--green); }
+  .t-out-red { color: var(--red); }
+  .t-comment { color: var(--text-muted); font-style: italic; }
+  .t-dim { color: var(--text-muted); }
+  .t-line { display: block; }
+
+  .cursor {
+    display: inline-block;
+    width: 8px; height: 1em;
+    background: var(--green);
+    vertical-align: text-bottom;
+    animation: blink 1.1s step-end infinite;
+  }
+
+  @keyframes blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0; }
+  }
+
+  /* ── SECTION SHARED ── */
+  section { padding: 6rem 3rem; }
+  .section-inner { max-width: 1400px; margin: 0 auto; }
+
+  .section-label {
+    font-size: 0.7rem;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--green);
+    margin-bottom: 1rem;
+  }
+
+  .section-title {
+    font-family: var(--sans);
+    font-size: clamp(2rem, 4vw, 3.2rem);
+    font-weight: 800;
+    color: #fff;
+    letter-spacing: -0.02em;
+    line-height: 1.1;
+    margin-bottom: 1.2rem;
+  }
+
+  .section-sub {
+    color: var(--text-dim);
+    max-width: 560px;
+    line-height: 1.8;
+  }
+
+  /* ── HOW IT WORKS ── */
+  .how {
+    border-top: 1px solid var(--border);
+    background: var(--surface);
+  }
+
+  .how-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 0;
+    margin-top: 4rem;
+    border: 1px solid var(--border);
+  }
+
+  .how-item {
+    padding: 2.5rem;
+    border-right: 1px solid var(--border);
+    position: relative;
+    transition: background 0.2s;
+  }
+  .how-item:last-child { border-right: none; }
+  .how-item:hover { background: var(--green-glow); }
+
+  .how-num {
+    font-family: var(--sans);
+    font-size: 3rem;
+    font-weight: 800;
+    color: var(--text-muted);
+    line-height: 1;
+    margin-bottom: 1.5rem;
+  }
+
+  .how-title {
+    font-family: var(--sans);
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: #fff;
+    margin-bottom: 0.8rem;
+  }
+
+  .how-desc { color: var(--text-dim); font-size: 0.85rem; line-height: 1.7; }
+
+  /* ── FEATURES ── */
+  .features { border-top: 1px solid var(--border); }
+
+  .features-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1px;
+    background: var(--border);
+    margin-top: 4rem;
+    border: 1px solid var(--border);
+  }
+
+  .feature-card {
+    background: var(--black);
+    padding: 2.5rem;
+    transition: background 0.2s;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .feature-card:hover { background: var(--surface); }
+
+  .feature-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0;
+    width: 3px; height: 0;
+    background: var(--green);
+    transition: height 0.3s ease;
+  }
+  .feature-card:hover::before { height: 100%; }
+
+  .feature-icon {
+    font-size: 1.4rem;
+    margin-bottom: 1.2rem;
+    display: block;
+  }
+
+  .feature-title {
+    font-family: var(--sans);
+    font-size: 1rem;
+    font-weight: 700;
+    color: #fff;
+    margin-bottom: 0.6rem;
+  }
+
+  .feature-desc { color: var(--text-dim); font-size: 0.83rem; line-height: 1.7; }
+
+  .feature-tag {
+    display: inline-block;
+    margin-top: 1rem;
+    font-size: 0.68rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--green);
+    border: 1px solid var(--green-dim);
+    padding: 0.2rem 0.6rem;
+  }
+
+  /* ── PLUGINS ── */
+  .plugins {
+    border-top: 1px solid var(--border);
+    background: var(--surface);
+  }
+
+  .plugins-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    margin-bottom: 3rem;
+    flex-wrap: wrap;
+    gap: 1.5rem;
+  }
+
+  .plugin-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1px;
+    background: var(--border);
+    border: 1px solid var(--border);
+  }
+
+  .plugin-card {
+    background: var(--surface2);
+    padding: 1.8rem 1.5rem;
+    transition: background 0.2s;
+    cursor: default;
+  }
+  .plugin-card:hover { background: var(--black); }
+
+  .plugin-name {
+    font-size: 0.9rem;
+    font-weight: 700;
+    color: var(--green);
+    margin-bottom: 0.3rem;
+  }
+
+  .plugin-lang {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    margin-bottom: 0.8rem;
+  }
+
+  .plugin-desc { font-size: 0.78rem; color: var(--text-dim); line-height: 1.6; }
+
+  /* ── USE CASES ── */
+  .usecases { border-top: 1px solid var(--border); }
+
+  .usecase-list {
+    margin-top: 3rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    background: var(--border);
+    border: 1px solid var(--border);
+  }
+
+  .usecase-item {
+    background: var(--black);
+    display: grid;
+    grid-template-columns: 200px 1fr auto;
+    align-items: center;
+    gap: 2rem;
+    padding: 1.8rem 2rem;
+    transition: background 0.15s;
+    cursor: default;
+  }
+  .usecase-item:hover { background: var(--surface); }
+
+  .usecase-tag {
+    font-size: 0.7rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--amber);
+    border: 1px solid var(--amber-dim);
+    padding: 0.25rem 0.7rem;
+    white-space: nowrap;
+    display: inline-block;
+  }
+
+  .usecase-name {
+    font-family: var(--sans);
+    font-size: 1rem;
+    font-weight: 700;
+    color: #fff;
+    margin-bottom: 0.2rem;
+  }
+
+  .usecase-desc { font-size: 0.82rem; color: var(--text-dim); }
+
+  .usecase-arrow { color: var(--text-muted); font-size: 1.2rem; transition: color 0.2s, transform 0.2s; }
+  .usecase-item:hover .usecase-arrow { color: var(--green); transform: translateX(4px); }
+
+  /* ── CODE BLOCK ── */
+  .code-section {
+    border-top: 1px solid var(--border);
+    background: var(--surface);
+  }
+
+  .code-tabs {
+    display: flex;
+    gap: 0;
+    border-bottom: 1px solid var(--border);
+    margin-top: 3rem;
+  }
+
+  .code-tab {
+    padding: 0.8rem 1.5rem;
+    font-size: 0.78rem;
+    color: var(--text-dim);
+    letter-spacing: 0.06em;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    transition: color 0.2s, border-color 0.2s;
+    text-transform: uppercase;
+  }
+  .code-tab.active { color: var(--green); border-bottom-color: var(--green); }
+
+  .code-block {
+    background: var(--black);
+    border: 1px solid var(--border);
+    border-top: none;
+    padding: 2rem;
+    font-size: 0.82rem;
+    line-height: 1.9;
+    overflow-x: auto;
+    display: none;
+  }
+  .code-block.active { display: block; }
+
+  .code-line { display: block; white-space: pre; }
+
+  .kw { color: var(--blue); }
+  .fn { color: var(--green); }
+  .str { color: var(--amber); }
+  .cmt { color: var(--text-muted); font-style: italic; }
+  .typ { color: #c792ea; }
+
+  /* ── CTA ── */
+  .cta-section {
+    border-top: 1px solid var(--border);
+    text-align: center;
+    padding: 8rem 3rem;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .cta-section::before {
+    content: '';
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    width: 600px; height: 600px;
+    background: radial-gradient(circle, var(--green-glow) 0%, transparent 70%);
+    pointer-events: none;
+  }
+
+  .cta-title {
+    font-family: var(--sans);
+    font-size: clamp(2.5rem, 5vw, 4.5rem);
+    font-weight: 800;
+    color: #fff;
+    letter-spacing: -0.03em;
+    line-height: 1;
+    margin-bottom: 1.5rem;
+  }
+
+  .cta-sub {
+    color: var(--text-dim);
+    max-width: 480px;
+    margin: 0 auto 2.5rem;
+    line-height: 1.8;
+  }
+
+  .cta-install {
+    display: inline-flex;
+    align-items: center;
+    gap: 1rem;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    padding: 0.9rem 1.5rem;
+    font-size: 0.85rem;
+    color: var(--text);
+    margin-top: 2rem;
+    cursor: pointer;
+    transition: border-color 0.2s;
+  }
+  .cta-install:hover { border-color: var(--green); }
+  .cta-install .dollar { color: var(--green); }
+
+  /* ── FOOTER ── */
+  footer {
+    border-top: 1px solid var(--border);
+    padding: 2rem 3rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    max-width: 100%;
+  }
+
+  .footer-logo {
+    font-family: var(--sans);
+    font-weight: 800;
+    color: var(--text-dim);
+    font-size: 0.9rem;
+  }
+  .footer-logo span { color: var(--green); }
+
+  .footer-links {
+    display: flex;
+    gap: 2rem;
+    list-style: none;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+  }
+  .footer-links a { color: var(--text-muted); transition: color 0.2s; }
+  .footer-links a:hover { color: var(--text-dim); }
+
+  .footer-copy { font-size: 0.72rem; color: var(--text-muted); }
+
+  /* ── ANIMATIONS ── */
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(20px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .reveal {
+    opacity: 0;
+    transform: translateY(24px);
+    transition: opacity 0.6s ease, transform 0.6s ease;
+  }
+  .reveal.visible { opacity: 1; transform: none; }
+
+  /* ── RESPONSIVE ── */
+  @media (max-width: 900px) {
+    nav { padding: 1rem 1.5rem; }
+    .nav-links { display: none; }
+    .hero { grid-template-columns: 1fr; padding: 7rem 1.5rem 3rem; gap: 3rem; }
+    .how-grid { grid-template-columns: 1fr; }
+    .how-item { border-right: none; border-bottom: 1px solid var(--border); }
+    .features-grid { grid-template-columns: 1fr; }
+    .plugin-grid { grid-template-columns: repeat(2, 1fr); }
+    .usecase-item { grid-template-columns: 1fr; gap: 0.5rem; }
+    .usecase-tag { margin-bottom: 0.5rem; }
+    section { padding: 4rem 1.5rem; }
+    footer { flex-direction: column; gap: 1.5rem; text-align: center; }
+  }
+</style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav>
+  <div class="nav-logo">mem<span>sh</span></div>
+  <ul class="nav-links">
+    <li><a href="#features">Features</a></li>
+    <li><a href="#plugins">Plugins</a></li>
+    <li><a href="#usecases">Use Cases</a></li>
+    <li><a href="#docs">Docs</a></li>
+  </ul>
+  <a href="https://github.com" class="nav-cta">GitHub →</a>
+</nav>
+
+<!-- HERO -->
+<section style="padding:0; border:none;">
+  <div class="hero">
+    <div class="hero-left">
+      <div class="hero-badge">v0.1.0 — open source</div>
+      <h1 class="hero-title">
+        A shell that<br>
+        <span class="accent">touches</span><br>
+        <span class="dim">nothing.</span>
+      </h1>
+      <p class="hero-sub">
+        <strong>memsh</strong> is a hermetic, in-memory shell runtime for Go.
+        Execute bash-like commands, run Python and JS, compose WASM plugins —
+        all inside an isolated <strong>afero.MemMapFs</strong>.
+        Zero real OS contact. Full observability. Embeds anywhere.
+      </p>
+      <div class="hero-actions">
+        <a href="#" class="btn-primary">Get Started</a>
+        <a href="#" class="btn-ghost">View on GitHub</a>
+      </div>
+      <div class="hero-stats">
+        <div>
+          <div class="stat-val">&lt;<span>1</span>ms</div>
+          <div class="stat-label">Session spinup</div>
+        </div>
+        <div>
+          <div class="stat-val">0<span>B</span></div>
+          <div class="stat-label">Real FS writes</div>
+        </div>
+        <div>
+          <div class="stat-val">∞<span></span></div>
+          <div class="stat-label">Parallel sessions</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="hero-right">
+      <div class="terminal">
+        <div class="term-bar">
+          <div class="term-dot red"></div>
+          <div class="term-dot amber"></div>
+          <div class="term-dot green"></div>
+          <div class="term-title">memsh — agent session #a3f2</div>
+        </div>
+        <div class="term-body">
+          <span class="t-line t-comment"># hermetic Python execution</span>
+          <span class="t-line"><span class="t-prompt">memsh $</span> <span class="t-cmd">python</span> <span class="t-flag">-c</span> <span class="t-path">"import json; print(json.dumps({'ok':True}))"</span></span>
+          <span class="t-line t-out-green">{"ok": true}</span>
+          <span class="t-line">&nbsp;</span>
+          <span class="t-line t-comment"># pipe through native plugins</span>
+          <span class="t-line"><span class="t-prompt">memsh $</span> <span class="t-cmd">echo</span> <span class="t-str">"Alice\nBob\nCharlie"</span> <span class="t-dim">|</span> <span class="t-cmd">base64</span></span>
+          <span class="t-line t-out">QWxpY2UKQm9iCkNoYXJsaWUK</span>
+          <span class="t-line">&nbsp;</span>
+          <span class="t-line t-comment"># build pipeline simulation</span>
+          <span class="t-line"><span class="t-prompt">memsh $</span> <span class="t-cmd">mkdir</span> <span class="t-flag">-p</span> <span class="t-path">/build/dist</span></span>
+          <span class="t-line"><span class="t-prompt">memsh $</span> <span class="t-cmd">echo</span> <span class="t-str">"v1.0.0"</span> <span class="t-dim">&gt;</span> <span class="t-path">/build/version.txt</span></span>
+          <span class="t-line"><span class="t-prompt">memsh $</span> <span class="t-cmd">cat</span> <span class="t-path">/build/version.txt</span> <span class="t-dim">|</span> <span class="t-cmd">wc</span> <span class="t-flag">-c</span></span>
+          <span class="t-line t-out">7</span>
+          <span class="t-line">&nbsp;</span>
+          <span class="t-prompt">memsh $</span> <span class="t-cmd">ls</span> <span class="t-flag">-R</span> <span class="t-path">/build</span></span>
+          <span class="t-line t-out">/build:</span>
+          <span class="t-line t-out">version.txt</span>
+          <span class="t-line t-out"></span>
+          <span class="t-line t-out">/build/dist:</span>
+          <span class="t-line">&nbsp;</span>
+          <span class="t-prompt">memsh $</span> <span class="cursor"></span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- HOW IT WORKS -->
+<section class="how" id="how">
+  <div class="section-inner">
+    <div class="section-label reveal">How it works</div>
+    <h2 class="section-title reveal">Three layers.<br>One guarantee.</h2>
+
+    <div class="how-grid reveal">
+      <div class="how-item">
+        <div class="how-num">01</div>
+        <div class="how-title">Hermetic FS</div>
+        <div class="how-desc">Every file operation goes through <code>afero.MemMapFs</code>. The real OS filesystem is completely invisible to plugins, scripts, and commands. Nothing leaks in or out.</div>
+      </div>
+      <div class="how-item">
+        <div class="how-num">02</div>
+        <div class="how-title">WASM Isolation</div>
+        <div class="how-desc">Plugins run as WASM modules via wazero. Each invocation gets a fresh module instance. No shared linear memory. No OS syscalls. No escape path.</div>
+      </div>
+      <div class="how-item">
+        <div class="how-num">03</div>
+        <div class="how-title">Full Observability</div>
+        <div class="how-desc">Every command is logged. Every FS write is tracked. Snapshot and restore any session state. Replay executions deterministically. Audit everything.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- FEATURES -->
+<section class="features" id="features">
+  <div class="section-inner">
+    <div class="section-label reveal">Features</div>
+    <h2 class="section-title reveal">Built for<br>production use.</h2>
+    <p class="section-sub reveal">Not a toy shell. A production-grade embedded runtime with the guarantees that real systems need.</p>
+
+    <div class="features-grid reveal">
+      <div class="feature-card">
+        <span class="feature-icon">⚡</span>
+        <div class="feature-title">Sub-millisecond spinup</div>
+        <div class="feature-desc">A session is just a Go struct. No container provisioning, no process fork, no warm pool needed. Spin up isolated sessions with zero infrastructure overhead.</div>
+        <span class="feature-tag">Performance</span>
+      </div>
+      <div class="feature-card">
+        <span class="feature-icon">🔒</span>
+        <div class="feature-title">Hermetic filesystem</div>
+        <div class="feature-desc">All file operations go through afero.MemMapFs. The real OS filesystem is completely invisible. Nothing leaks in or out. Perfect for testing and sandboxing.</div>
+        <span class="feature-tag">Security</span>
+      </div>
+      <div class="feature-card">
+        <span class="feature-icon">🧩</span>
+        <div class="feature-title">WASM plugin support</div>
+        <div class="feature-desc">Extend with custom plugins compiled to WASM via wazero. Write in Go (GOOS=wasip1), Rust, or C. OS-agnostic, capability-declared, fully isolated.</div>
+        <span class="feature-tag">Extensibility</span>
+      </div>
+      <div class="feature-card">
+        <span class="feature-icon">🐚</span>
+        <div class="feature-title">Real bash semantics</div>
+        <div class="feature-desc">Powered by mvdan.cc/sh/v3 — the same parser used by production Go tooling. Full shell syntax, pipes, redirects, and control flow.</div>
+        <span class="feature-tag">Compatibility</span>
+      </div>
+      <div class="feature-card">
+        <span class="feature-icon">📦</span>
+        <div class="feature-title">Built-in commands</div>
+        <div class="feature-desc">Core utilities included: ls, cat, mkdir, rm, touch, echo, tee, pwd, cd. Plus native plugins: base64, wc. All work on the virtual FS.</div>
+        <span class="feature-tag">Convenience</span>
+      </div>
+      <div class="feature-card">
+        <span class="feature-icon">🔌</span>
+        <div class="feature-title">Embeddable Go library</div>
+        <div class="feature-desc">Drop into any Go application. Use functional options for configuration: WithFS, WithStdIO, WithCwd, WithEnv, WithPlugin, WithBuiltin.</div>
+        <span class="feature-tag">API</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- PLUGINS -->
+<section class="plugins" id="plugins">
+  <div class="section-inner">
+    <div class="plugins-header">
+      <div>
+        <div class="section-label reveal">Plugin ecosystem</div>
+        <h2 class="section-title reveal">WASM plugins.<br>Real commands.</h2>
+      </div>
+      <p class="section-sub reveal" style="max-width:320px;">Author in TinyGo, Rust, or C. Distribute as a single .wasm file. OS-agnostic, version-pinned, capability-declared.</p>
+    </div>
+
+    <div class="plugin-grid reveal">
+      <div class="plugin-card">
+        <div class="plugin-name">base64</div>
+        <div class="plugin-lang">Native Go</div>
+        <div class="plugin-desc">Encode or decode data using base64 encoding. Works seamlessly with pipes and redirects.</div>
+      </div>
+      <div class="plugin-card">
+        <div class="plugin-name">wc</div>
+        <div class="plugin-lang">Native Go</div>
+        <div class="plugin-desc">Count lines, words, characters, and bytes. Supports -c, -l, -w, -m flags.</div>
+      </div>
+      <div class="plugin-card plugin-card-more">
+        <div class="plugin-name">+ custom WASM</div>
+        <div class="plugin-lang">TinyGo / Rust / C</div>
+        <div class="plugin-desc">Build your own plugins with GOOS=wasip1. Write standard Go code, compile to WASM, load into memsh.</div>
+      </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- CODE -->
+<section class="code-section" id="docs">
+  <div class="section-inner">
+    <div class="section-label reveal">Quick start</div>
+    <h2 class="section-title reveal">Embed in minutes.</h2>
+
+    <div class="code-tabs reveal">
+      <div class="code-tab active" onclick="switchTab(this,'tab-embed')">Embed</div>
+    </div>
+
+    <div class="code-block active" id="tab-embed">
+<span class="code-line"><span class="kw">import</span> (</span>
+<span class="code-line">    <span class="str">"context"</span></span>
+<span class="code-line">    <span class="str">"bytes"</span></span>
+<span class="code-line">    <span class="str">"fmt"</span></span>
+<span class="code-line">    <span class="str">"github.com/amjadjibon/memsh/shell"</span></span>
+<span class="code-line">)</span>
+<span class="code-line"></span>
+<span class="code-line"><span class="cmt">// capture output in memory</span></span>
+<span class="code-line"><span class="kw">var</span> out <span class="typ">bytes</span>.<span class="typ">Buffer</span></span>
+<span class="code-line"></span>
+<span class="code-line"><span class="cmt">// create a hermetic shell session</span></span>
+<span class="code-line"><span class="fn">sh</span>, err := shell.<span class="fn">New</span>(</span>
+<span class="code-line">    shell.<span class="fn">WithStdIO</span>(<span class="kw">nil</span>, &out, &out),</span>
+<span class="code-line">)</span>
+<span class="code-line"><span class="kw">if</span> err != <span class="kw">nil</span> {</span>
+<span class="code-line">    <span class="kw">return</span> err</span>
+<span class="code-line">}</span>
+<span class="code-line"></span>
+<span class="code-line"><span class="cmt">// execute bash commands — zero real OS contact</span></span>
+<span class="code-line">ctx := context.<span class="fn">Background</span>()</span>
+<span class="code-line">err = sh.<span class="fn">Run</span>(ctx, <span class="str">`mkdir -p /workspace/data</span></span>
+<span class="code-line"><span class="t-str">echo "Alice" > /workspace/data/users.txt</span></span>
+<span class="code-line"><span class="t-str">echo "Bob" >> /workspace/data/users.txt</span></span>
+<span class="code-line"><span class="t-str">cat /workspace/data/users.txt | wc -l`</span>)</span>
+<span class="code-line"></span>
+<span class="code-line"><span class="cmt">// output: 2</span></span>
+<span class="code-line">fmt.<span class="fn">Println</span>(out.<span class="fn">String</span>())</span>
+    </div>
+  </div>
+</section>
+
+<!-- USE CASES -->
+<section class="usecases" id="usecases">
+  <div class="section-inner">
+    <div class="section-label reveal">Use cases</div>
+    <h2 class="section-title reveal">What people<br>build with it.</h2>
+
+    <div class="usecase-list reveal">
+      <div class="usecase-item">
+        <span class="usecase-tag">AI / Agents</span>
+        <div>
+          <div class="usecase-name">Code Interpreter Backend</div>
+          <div class="usecase-desc">Safe execution environment for LLM-generated code. No containers, no VMs, sub-ms spinup.</div>
+        </div>
+        <span class="usecase-arrow">→</span>
+      </div>
+      <div class="usecase-item">
+        <span class="usecase-tag">DevOps</span>
+        <div>
+          <div class="usecase-name">Shell Script Test Framework</div>
+          <div class="usecase-desc">Hermetic, parallel shell tests with pre-seeded fixtures. No temp dirs, no cleanup.</div>
+        </div>
+        <span class="usecase-arrow">→</span>
+      </div>
+      <div class="usecase-item">
+        <span class="usecase-tag">Platform Eng</span>
+        <div>
+          <div class="usecase-name">GitOps Dry-run Engine</div>
+          <div class="usecase-desc">Run Terraform and Helm against a virtual FS. See the diff without touching real infra.</div>
+        </div>
+        <span class="usecase-arrow">→</span>
+      </div>
+      <div class="usecase-item">
+        <span class="usecase-tag">EdTech</span>
+        <div>
+          <div class="usecase-name">Interactive Shell Tutorials</div>
+          <div class="usecase-desc">Real bash semantics, hermetic environment. Students can't break anything. No VM cost.</div>
+        </div>
+        <span class="usecase-arrow">→</span>
+      </div>
+      <div class="usecase-item">
+        <span class="usecase-tag">Compliance</span>
+        <div>
+          <div class="usecase-name">Reproducible Audit Trails</div>
+          <div class="usecase-desc">Prove what ran, on what data, with what output. Session replay for regulatory submissions.</div>
+        </div>
+        <span class="usecase-arrow">→</span>
+      </div>
+      <div class="usecase-item">
+        <span class="usecase-tag">SRE</span>
+        <div>
+          <div class="usecase-name">Executable Runbooks</div>
+          <div class="usecase-desc">Runbook steps that actually execute and verify. Alerts when a step starts failing before an incident.</div>
+        </div>
+        <span class="usecase-arrow">→</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- CTA -->
+<section class="cta-section">
+  <div class="section-label reveal">Open source</div>
+  <h2 class="cta-title reveal">Start building<br>today.</h2>
+  <p class="cta-sub reveal">MIT licensed. No vendor lock-in. Embed in any Go project in minutes.</p>
+  <div style="display:flex;gap:1rem;justify-content:center;flex-wrap:wrap;" class="reveal">
+    <a href="#" class="btn-primary">Read the docs</a>
+    <a href="#" class="btn-ghost">Star on GitHub</a>
+  </div>
+  <div class="cta-install reveal">
+    <span class="dollar">$</span>
+    <span>go get github.com/amjadjibon/memsh</span>
+  </div>
+</section>
+
+<!-- FOOTER -->
+<footer>
+  <div class="footer-logo">mem<span>sh</span></div>
+  <ul class="footer-links">
+    <li><a href="#">Docs</a></li>
+    <li><a href="#">GitHub</a></li>
+    <li><a href="#">Changelog</a></li>
+    <li><a href="#">License</a></li>
+  </ul>
+  <div class="footer-copy">Built with Go + wazero + afero</div>
+</footer>
+
+<script>
+  // Tab switching
+  function switchTab(el, id) {
+    document.querySelectorAll('.code-tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.code-block').forEach(b => b.classList.remove('active'));
+    el.classList.add('active');
+    document.getElementById(id).classList.add('active');
+  }
+
+  // Scroll reveal
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach(e => {
+      if (e.isIntersecting) {
+        e.target.classList.add('visible');
+        // stagger children
+        e.target.querySelectorAll('.how-item, .feature-card, .plugin-card, .usecase-item').forEach((child, i) => {
+          child.style.transitionDelay = `${i * 0.07}s`;
+          child.style.opacity = '0';
+          child.style.transform = 'translateY(16px)';
+          child.style.transition = 'opacity 0.5s ease, transform 0.5s ease';
+          setTimeout(() => {
+            child.style.opacity = '1';
+            child.style.transform = 'none';
+          }, i * 70);
+        });
+      }
+    });
+  }, { threshold: 0.1 });
+
+  document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
+
+  // Terminal typewriter effect on load
+  const lines = document.querySelectorAll('.term-body .t-line');
+  lines.forEach((line, i) => {
+    line.style.opacity = '0';
+    setTimeout(() => {
+      line.style.transition = 'opacity 0.3s ease';
+      line.style.opacity = '1';
+    }, 400 + i * 180);
+  });
+</script>
+</body>
+</html>
