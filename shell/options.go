@@ -93,6 +93,15 @@ func WithPluginFilter(names []string) Option {
 	}
 }
 
+// WithAllowExternalCommands permits falling back to real OS executables when a
+// command is not found among builtins or plugins. By default this is false,
+// which keeps all execution inside the virtual sandbox.
+func WithAllowExternalCommands(allow bool) Option {
+	return func(s *Shell) {
+		s.allowExternalCmds = allow
+	}
+}
+
 // WithDisabledPlugins removes the named plugins from the shell.
 // Works for both native (builtin) and WASM plugins.
 // Applied after defaults, so it can suppress defaultNativePlugins entries.

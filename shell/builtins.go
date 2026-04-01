@@ -219,7 +219,10 @@ func (s *Shell) execHandler(next interp.ExecHandlerFunc) interp.ExecHandlerFunc 
 			if _, ok := s.plugins[args[0]]; ok {
 				return s.runPlugin(ctx, args[0], args)
 			}
-			return next(ctx, args)
+			if s.allowExternalCmds {
+				return next(ctx, args)
+			}
+			return fmt.Errorf("%s: command not found", args[0])
 		}
 	}
 }
@@ -264,11 +267,16 @@ func (s *Shell) builtinMkdir(ctx context.Context, args []string) error {
 	var dirs []string
 
 	for i := 1; i < len(args); i++ {
-		switch args[i] {
-		case "-p":
-		case "-v":
-			verbose = true
-		case "-m":
+		a := args[i]
+		if a == "--" {
+			dirs = append(dirs, args[i+1:]...)
+			break
+		}
+		if a == "" || a[0] != '-' {
+			dirs = append(dirs, a)
+			continue
+		}
+		if a == "-m" || a == "--mode" {
 			if i+1 >= len(args) {
 				return fmt.Errorf("mkdir: missing operand for -m")
 			}
@@ -278,8 +286,27 @@ func (s *Shell) builtinMkdir(ctx context.Context, args []string) error {
 				return fmt.Errorf("mkdir: invalid mode '%s'", args[i])
 			}
 			perm = os.FileMode(v)
-		default:
-			dirs = append(dirs, args[i])
+			continue
+		}
+		if a == "--parents" {
+			continue
+		}
+		if a == "--verbose" {
+			verbose = true
+			continue
+		}
+		unknown := ""
+		for _, c := range a[1:] {
+			switch c {
+			case 'p':
+			case 'v':
+				verbose = true
+			default:
+				unknown += string(c)
+			}
+		}
+		if unknown != "" {
+			return fmt.Errorf("mkdir: invalid option -- '%s'", unknown)
 		}
 	}
 
@@ -304,21 +331,62 @@ func (s *Shell) builtinRm(ctx context.Context, args []string) error {
 	recursive := false
 	verbose := false
 	dirOnly := false
+	interactive := false
+	endOfFlags := false
 	var targets []string
 
 	for _, a := range args[1:] {
-		switch {
-		case a == "-f", a == "--force":
-			force = true
-		case a == "-r", a == "-R", a == "--recursive":
-			recursive = true
-		case a == "-i":
-		case a == "-v", a == "--verbose":
-			verbose = true
-		case a == "-d":
-			dirOnly = true
-		default:
+		if endOfFlags || a == "" || a[0] != '-' {
 			targets = append(targets, a)
+			continue
+		}
+		if a == "--" {
+			endOfFlags = true
+			continue
+		}
+		if a == "--force" {
+			force = true
+			continue
+		}
+		if a == "--recursive" {
+			recursive = true
+			continue
+		}
+		if a == "--verbose" {
+			verbose = true
+			continue
+		}
+		if a == "--dir" {
+			dirOnly = true
+			continue
+		}
+		if a == "--interactive" {
+			interactive = true
+			continue
+		}
+		// combined short flags: -rf, -rfv, etc.
+		unknown := ""
+		for _, c := range a[1:] {
+			switch c {
+			case 'f':
+				force = true
+			case 'r', 'R':
+				recursive = true
+			case 'v':
+				verbose = true
+			case 'd':
+				dirOnly = true
+			case 'i':
+				interactive = true
+			case 'I':
+				// prompt once before removing more than 3 files — treat as interactive
+				interactive = true
+			default:
+				unknown += string(c)
+			}
+		}
+		if unknown != "" {
+			return fmt.Errorf("rm: invalid option -- '%s'", unknown)
 		}
 	}
 
@@ -343,12 +411,33 @@ func (s *Shell) builtinRm(ctx context.Context, args []string) error {
 			if !recursive && !dirOnly {
 				return fmt.Errorf("rm: cannot remove '%s': Is a directory", target)
 			}
+			if interactive && recursive {
+				fmt.Fprintf(hc.Stdout, "rm: descend into directory '%s'? ", target)
+				var resp string
+				fmt.Fscan(hc.Stdin, &resp)
+				resp = strings.ToLower(strings.TrimSpace(resp))
+				if resp != "y" && resp != "yes" {
+					continue
+				}
+			}
+		} else if interactive {
+			fmt.Fprintf(hc.Stdout, "rm: remove regular file '%s'? ", target)
+			var resp string
+			fmt.Fscan(hc.Stdin, &resp)
+			resp = strings.ToLower(strings.TrimSpace(resp))
+			if resp != "y" && resp != "yes" {
+				continue
+			}
 		}
 		if err := s.fs.RemoveAll(absPath); err != nil {
 			return fmt.Errorf("rm: cannot remove '%s': %w", target, err)
 		}
 		if verbose {
-			fmt.Fprintf(hc.Stdout, "removed '%s'\n", target)
+			if info.IsDir() {
+				fmt.Fprintf(hc.Stdout, "removed directory '%s'\n", target)
+			} else {
+				fmt.Fprintf(hc.Stdout, "removed '%s'\n", target)
+			}
 		}
 	}
 	return nil
@@ -393,19 +482,34 @@ func (s *Shell) builtinTouch(_ context.Context, args []string) error {
 	var targets []string
 
 	for i := 1; i < len(args); i++ {
-		switch args[i] {
-		case "-c":
-			noCreate = true
-		case "-r":
+		a := args[i]
+		if a == "--" {
+			targets = append(targets, args[i+1:]...)
+			break
+		}
+		if a == "" || a[0] != '-' || a == "-" {
+			targets = append(targets, a)
+			continue
+		}
+		if a == "-r" {
 			if i+1 >= len(args) {
 				return fmt.Errorf("touch: missing operand for -r")
 			}
 			i++
 			reference = args[i]
-		default:
-			if !strings.HasPrefix(args[i], "-") || args[i] == "-" {
-				targets = append(targets, args[i])
+			continue
+		}
+		unknown := ""
+		for _, c := range a[1:] {
+			switch c {
+			case 'c':
+				noCreate = true
+			default:
+				unknown += string(c)
 			}
+		}
+		if unknown != "" {
+			return fmt.Errorf("touch: invalid option -- '%s'", unknown)
 		}
 	}
 
@@ -454,16 +558,44 @@ func (s *Shell) builtinLs(ctx context.Context, args []string) error {
 	recursive := false
 	var targets []string
 
-	for _, a := range args[1:] {
-		switch {
-		case a == "-l", a == "--format=long":
-			longFormat = true
-		case a == "-a", a == "--all":
-			showAll = true
-		case a == "-R", a == "--recursive":
-			recursive = true
-		default:
+	endOfFlags := false
+	for i := 1; i < len(args); i++ {
+		a := args[i]
+		if endOfFlags || a == "" || a[0] != '-' {
 			targets = append(targets, a)
+			continue
+		}
+		if a == "--" {
+			endOfFlags = true
+			continue
+		}
+		if a == "--format=long" {
+			longFormat = true
+			continue
+		}
+		if a == "--all" {
+			showAll = true
+			continue
+		}
+		if a == "--recursive" {
+			recursive = true
+			continue
+		}
+		unknown := ""
+		for _, c := range a[1:] {
+			switch c {
+			case 'l':
+				longFormat = true
+			case 'a':
+				showAll = true
+			case 'R':
+				recursive = true
+			default:
+				unknown += string(c)
+			}
+		}
+		if unknown != "" {
+			return fmt.Errorf("ls: invalid option -- '%s'", unknown)
 		}
 	}
 
@@ -807,15 +939,36 @@ func expandPrintfFormat(format string, args []string) string {
 func (s *Shell) builtinCp(_ context.Context, args []string) error {
 	recursive := false
 	var positional []string
-	for _, a := range args[1:] {
-		switch a {
-		case "-r", "-R", "--recursive":
-			recursive = true
-		case "-v", "--verbose":
-		case "-p", "--preserve":
-		case "-i", "--interactive":
-		default:
+	endOfFlags := false
+	for i := 1; i < len(args); i++ {
+		a := args[i]
+		if endOfFlags || a == "" || a[0] != '-' {
 			positional = append(positional, a)
+			continue
+		}
+		if a == "--" {
+			endOfFlags = true
+			continue
+		}
+		if a == "--recursive" {
+			recursive = true
+			continue
+		}
+		if a == "--verbose" || a == "--preserve" || a == "--interactive" {
+			continue
+		}
+		unknown := ""
+		for _, c := range a[1:] {
+			switch c {
+			case 'r', 'R':
+				recursive = true
+			case 'v', 'p', 'i':
+			default:
+				unknown += string(c)
+			}
+		}
+		if unknown != "" {
+			return fmt.Errorf("cp: invalid option -- '%s'", unknown)
 		}
 	}
 	if len(positional) < 2 {
@@ -1103,11 +1256,32 @@ func (s *Shell) builtinTee(ctx context.Context, args []string) error {
 	appendMode := false
 	var targets []string
 
-	for _, a := range args[1:] {
-		if a == "-a" {
-			appendMode = true
-		} else {
+	endOfFlags := false
+	for i := 1; i < len(args); i++ {
+		a := args[i]
+		if endOfFlags || a == "" || a[0] != '-' {
 			targets = append(targets, a)
+			continue
+		}
+		if a == "--" {
+			endOfFlags = true
+			continue
+		}
+		if a == "--append" {
+			appendMode = true
+			continue
+		}
+		unknown := ""
+		for _, c := range a[1:] {
+			switch c {
+			case 'a':
+				appendMode = true
+			default:
+				unknown += string(c)
+			}
+		}
+		if unknown != "" {
+			return fmt.Errorf("tee: invalid option -- '%s'", unknown)
 		}
 	}
 
@@ -1147,16 +1321,44 @@ func (s *Shell) builtinSort(ctx context.Context, args []string) error {
 	reverse, unique, numeric := false, false, false
 	var files []string
 
-	for _, a := range args[1:] {
-		switch a {
-		case "-r":
-			reverse = true
-		case "-u":
-			unique = true
-		case "-n":
-			numeric = true
-		default:
+	endOfFlags := false
+	for i := 1; i < len(args); i++ {
+		a := args[i]
+		if endOfFlags || a == "" || a[0] != '-' {
 			files = append(files, a)
+			continue
+		}
+		if a == "--" {
+			endOfFlags = true
+			continue
+		}
+		if a == "--reverse" {
+			reverse = true
+			continue
+		}
+		if a == "--unique" {
+			unique = true
+			continue
+		}
+		if a == "--numeric-sort" {
+			numeric = true
+			continue
+		}
+		unknown := ""
+		for _, c := range a[1:] {
+			switch c {
+			case 'r':
+				reverse = true
+			case 'u':
+				unique = true
+			case 'n':
+				numeric = true
+			default:
+				unknown += string(c)
+			}
+		}
+		if unknown != "" {
+			return fmt.Errorf("sort: invalid option -- '%s'", unknown)
 		}
 	}
 
@@ -1201,16 +1403,44 @@ func (s *Shell) builtinUniq(ctx context.Context, args []string) error {
 	count, onlyDups, onlyUniq := false, false, false
 	var files []string
 
-	for _, a := range args[1:] {
-		switch a {
-		case "-c":
-			count = true
-		case "-d":
-			onlyDups = true
-		case "-u":
-			onlyUniq = true
-		default:
+	endOfFlags := false
+	for i := 1; i < len(args); i++ {
+		a := args[i]
+		if endOfFlags || a == "" || a[0] != '-' {
 			files = append(files, a)
+			continue
+		}
+		if a == "--" {
+			endOfFlags = true
+			continue
+		}
+		if a == "--count" {
+			count = true
+			continue
+		}
+		if a == "--repeated" {
+			onlyDups = true
+			continue
+		}
+		if a == "--unique" {
+			onlyUniq = true
+			continue
+		}
+		unknown := ""
+		for _, c := range a[1:] {
+			switch c {
+			case 'c':
+				count = true
+			case 'd':
+				onlyDups = true
+			case 'u':
+				onlyUniq = true
+			default:
+				unknown += string(c)
+			}
+		}
+		if unknown != "" {
+			return fmt.Errorf("uniq: invalid option -- '%s'", unknown)
 		}
 	}
 
@@ -1255,27 +1485,45 @@ func (s *Shell) builtinCut(ctx context.Context, args []string) error {
 	var fieldList, charList string
 	var files []string
 
+	endOfFlags := false
 	for i := 1; i < len(args); i++ {
-		switch args[i] {
-		case "-d":
-			if i+1 < len(args) {
-				i++
-				delim = args[i]
-			}
-		case "-f":
-			if i+1 < len(args) {
-				i++
-				fieldList = args[i]
-			}
-		case "-c":
-			if i+1 < len(args) {
-				i++
-				charList = args[i]
-			}
-		case "-s":
-		default:
-			files = append(files, args[i])
+		a := args[i]
+		if endOfFlags || a == "" || a[0] != '-' {
+			files = append(files, a)
+			continue
 		}
+		if a == "--" {
+			endOfFlags = true
+			continue
+		}
+		if a == "-d" || a == "--delimiter" {
+			if i+1 >= len(args) {
+				return fmt.Errorf("cut: missing operand for -d")
+			}
+			i++
+			delim = args[i]
+			continue
+		}
+		if a == "-f" || a == "--fields" {
+			if i+1 >= len(args) {
+				return fmt.Errorf("cut: missing operand for -f")
+			}
+			i++
+			fieldList = args[i]
+			continue
+		}
+		if a == "-c" || a == "--characters" {
+			if i+1 >= len(args) {
+				return fmt.Errorf("cut: missing operand for -c")
+			}
+			i++
+			charList = args[i]
+			continue
+		}
+		if a == "-s" || a == "--only-delimited" {
+			continue
+		}
+		return fmt.Errorf("cut: invalid option -- '%s'", a)
 	}
 
 	if fieldList == "" && charList == "" {
@@ -1369,16 +1617,44 @@ func (s *Shell) builtinTr(ctx context.Context, args []string) error {
 	delete, squeeze, complement := false, false, false
 	var positional []string
 
-	for _, a := range args[1:] {
-		switch a {
-		case "-d":
-			delete = true
-		case "-s":
-			squeeze = true
-		case "-c":
-			complement = true
-		default:
+	endOfFlags := false
+	for i := 1; i < len(args); i++ {
+		a := args[i]
+		if endOfFlags || a == "" || a[0] != '-' {
 			positional = append(positional, a)
+			continue
+		}
+		if a == "--" {
+			endOfFlags = true
+			continue
+		}
+		if a == "--delete" {
+			delete = true
+			continue
+		}
+		if a == "--squeeze-repeats" {
+			squeeze = true
+			continue
+		}
+		if a == "--complement" {
+			complement = true
+			continue
+		}
+		unknown := ""
+		for _, c := range a[1:] {
+			switch c {
+			case 'd':
+				delete = true
+			case 's':
+				squeeze = true
+			case 'c':
+				complement = true
+			default:
+				unknown += string(c)
+			}
+		}
+		if unknown != "" {
+			return fmt.Errorf("tr: invalid option -- '%s'", unknown)
 		}
 	}
 
@@ -1480,20 +1756,43 @@ func runeIndex(set []rune, r rune) int {
 }
 
 func (s *Shell) builtinChmod(_ context.Context, args []string) error {
-	if len(args) < 3 {
-		return fmt.Errorf("chmod: missing operand")
-	}
-	modeStr := args[1]
-
 	recursive := false
-	var targets []string
-	for _, a := range args[2:] {
-		if a == "-R" {
+	endOfFlags := false
+	var positional []string
+
+	for i := 1; i < len(args); i++ {
+		a := args[i]
+		if endOfFlags || a == "" || a[0] != '-' {
+			positional = append(positional, a)
+			continue
+		}
+		if a == "--" {
+			endOfFlags = true
+			continue
+		}
+		if a == "--recursive" {
 			recursive = true
-		} else {
-			targets = append(targets, a)
+			continue
+		}
+		unknown := ""
+		for _, c := range a[1:] {
+			switch c {
+			case 'R':
+				recursive = true
+			default:
+				unknown += string(c)
+			}
+		}
+		if unknown != "" {
+			return fmt.Errorf("chmod: invalid option -- '%s'", unknown)
 		}
 	}
+
+	if len(positional) < 2 {
+		return fmt.Errorf("chmod: missing operand")
+	}
+	modeStr := positional[0]
+	targets := positional[1:]
 
 	var mode os.FileMode
 	if strings.ContainsAny(modeStr, "ugoa+-=rwx") {
@@ -1622,11 +1921,32 @@ func (s *Shell) builtinDiff(ctx context.Context, args []string) error {
 	hc := interp.HandlerCtx(ctx)
 	unified := false
 	var files []string
-	for _, a := range args[1:] {
-		if a == "-u" {
-			unified = true
-		} else {
+	endOfFlags := false
+	for i := 1; i < len(args); i++ {
+		a := args[i]
+		if endOfFlags || a == "" || a[0] != '-' {
 			files = append(files, a)
+			continue
+		}
+		if a == "--" {
+			endOfFlags = true
+			continue
+		}
+		if a == "--unified" {
+			unified = true
+			continue
+		}
+		unknown := ""
+		for _, c := range a[1:] {
+			switch c {
+			case 'u':
+				unified = true
+			default:
+				unknown += string(c)
+			}
+		}
+		if unknown != "" {
+			return fmt.Errorf("diff: invalid option -- '%s'", unknown)
 		}
 	}
 	if len(files) < 2 {
@@ -1736,16 +2056,44 @@ func (s *Shell) builtinWc(ctx context.Context, args []string) error {
 	countLines, countWords, countBytes := false, false, false
 	var files []string
 
-	for _, a := range args[1:] {
-		switch a {
-		case "-l":
-			countLines = true
-		case "-w":
-			countWords = true
-		case "-c":
-			countBytes = true
-		default:
+	endOfFlags := false
+	for i := 1; i < len(args); i++ {
+		a := args[i]
+		if endOfFlags || a == "" || a[0] != '-' {
 			files = append(files, a)
+			continue
+		}
+		if a == "--" {
+			endOfFlags = true
+			continue
+		}
+		if a == "--lines" {
+			countLines = true
+			continue
+		}
+		if a == "--words" {
+			countWords = true
+			continue
+		}
+		if a == "--bytes" {
+			countBytes = true
+			continue
+		}
+		unknown := ""
+		for _, c := range a[1:] {
+			switch c {
+			case 'l':
+				countLines = true
+			case 'w':
+				countWords = true
+			case 'c':
+				countBytes = true
+			default:
+				unknown += string(c)
+			}
+		}
+		if unknown != "" {
+			return fmt.Errorf("wc: invalid option -- '%s'", unknown)
 		}
 	}
 
@@ -1836,33 +2184,76 @@ func (s *Shell) builtinGrep(ctx context.Context, args []string) error {
 	var pattern string
 	var files []string
 
+	endOfFlags := false
 	for i := 1; i < len(args); i++ {
-		switch args[i] {
-		case "-i":
-			caseInsensitive = true
-		case "-n":
-			showLineNum = true
-		case "-v":
-			invert = true
-		case "-r", "-R":
-			recursive = true
-		case "-c":
-			countMode = true
-		case "-l":
-			listFiles = true
-		case "-w":
-			wholeWord = true
-		case "-E":
-		case "-o":
-			onlyMatch = true
-		case "-q":
-		case "-s":
-		default:
+		a := args[i]
+		if endOfFlags || a == "" || a[0] != '-' {
 			if pattern == "" {
-				pattern = args[i]
+				pattern = a
 			} else {
-				files = append(files, args[i])
+				files = append(files, a)
 			}
+			continue
+		}
+		if a == "--" {
+			endOfFlags = true
+			continue
+		}
+		// long flags
+		switch a {
+		case "--ignore-case":
+			caseInsensitive = true
+			continue
+		case "--line-number":
+			showLineNum = true
+			continue
+		case "--invert-match":
+			invert = true
+			continue
+		case "--recursive":
+			recursive = true
+			continue
+		case "--count":
+			countMode = true
+			continue
+		case "--files-with-matches":
+			listFiles = true
+			continue
+		case "--word-regexp":
+			wholeWord = true
+			continue
+		case "--only-matching":
+			onlyMatch = true
+			continue
+		case "--extended-regexp", "--quiet", "--silent":
+			continue
+		}
+		unknown := ""
+		for _, c := range a[1:] {
+			switch c {
+			case 'i':
+				caseInsensitive = true
+			case 'n':
+				showLineNum = true
+			case 'v':
+				invert = true
+			case 'r', 'R':
+				recursive = true
+			case 'c':
+				countMode = true
+			case 'l':
+				listFiles = true
+			case 'w':
+				wholeWord = true
+			case 'E', 'q', 's':
+			case 'o':
+				onlyMatch = true
+			default:
+				unknown += string(c)
+			}
+		}
+		if unknown != "" {
+			return fmt.Errorf("grep: invalid option -- '%s'", unknown)
 		}
 	}
 
@@ -2288,12 +2679,30 @@ func (s *Shell) builtinWhich(ctx context.Context, args []string) error {
 
 func (s *Shell) builtinLn(_ context.Context, args []string) error {
 	var positional []string
-	for _, a := range args[1:] {
-		switch a {
-		case "-s", "--symbolic":
-		case "-f", "--force":
-		default:
+	endOfFlags := false
+	for i := 1; i < len(args); i++ {
+		a := args[i]
+		if endOfFlags || a == "" || a[0] != '-' {
 			positional = append(positional, a)
+			continue
+		}
+		if a == "--" {
+			endOfFlags = true
+			continue
+		}
+		if a == "--symbolic" || a == "--force" {
+			continue
+		}
+		unknown := ""
+		for _, c := range a[1:] {
+			switch c {
+			case 's', 'f':
+			default:
+				unknown += string(c)
+			}
+		}
+		if unknown != "" {
+			return fmt.Errorf("ln: invalid option -- '%s'", unknown)
 		}
 	}
 	if len(positional) < 2 {
@@ -2359,13 +2768,35 @@ func (s *Shell) builtinDu(ctx context.Context, args []string) error {
 	humanReadable := false
 	var targets []string
 
-	for _, a := range args[1:] {
-		switch a {
-		case "-h", "--human-readable":
-			humanReadable = true
-		case "-s", "--summary":
-		default:
+	endOfFlags := false
+	for i := 1; i < len(args); i++ {
+		a := args[i]
+		if endOfFlags || a == "" || a[0] != '-' {
 			targets = append(targets, a)
+			continue
+		}
+		if a == "--" {
+			endOfFlags = true
+			continue
+		}
+		if a == "--human-readable" || a == "--summary" {
+			if a == "--human-readable" {
+				humanReadable = true
+			}
+			continue
+		}
+		unknown := ""
+		for _, c := range a[1:] {
+			switch c {
+			case 'h':
+				humanReadable = true
+			case 's':
+			default:
+				unknown += string(c)
+			}
+		}
+		if unknown != "" {
+			return fmt.Errorf("du: invalid option -- '%s'", unknown)
 		}
 	}
 
@@ -2439,7 +2870,7 @@ var builtinHelp = map[string][2]string{
 	"printf": {"format and print data", "printf <format> [args...]"},
 	"pwd":    {"print working directory", "pwd"},
 	"read":   {"read a line from stdin", "read [var]..."},
-	"rm":     {"remove files or directories", "rm [-f] [-r] [-v] <path>..."},
+	"rm":     {"remove files or directories", "rm [-f] [-r] [-R] [-v] [-d] [-i] [-I] [--] <path>..."},
 	"rmdir":  {"remove empty directories", "rmdir <dir>..."},
 	"sed":    {"stream editor (substitution)", "sed 's/pattern/replacement/[g]' [file]"},
 	"seq":    {"print a sequence of numbers", "seq [first [increment]] last"},

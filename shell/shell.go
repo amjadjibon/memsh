@@ -32,7 +32,8 @@ type Shell struct {
 	builtins map[string]BuiltinFunc
 	fds      map[uint32]afero.File
 
-	wasmEnabled bool
+	wasmEnabled          bool
+	allowExternalCmds    bool
 
 	pluginFilter map[string]struct{}
 
