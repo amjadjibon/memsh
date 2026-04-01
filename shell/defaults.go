@@ -23,6 +23,7 @@ func defaultNativePlugins() []plugins.Plugin {
 		native.FindPlugin{},
 		native.AwkPlugin{},
 		native.LuaPlugin{},
+		native.GojaPlugin{},
 	}
 }
 

@@ -25,6 +25,18 @@ go test ./...
 # Run a single test
 go test ./shell/... -run TestName
 
+# Run tests in tests directory
+go test ./tests -v
+
+# Run specific test suite
+go test ./tests -run TestLua -v
+go test ./tests -run TestGrep -v
+go test ./tests -run TestFind -v
+go test ./tests -run TestAwk -v
+go test ./tests -run TestBase64 -v
+go test ./tests -run TestWc -v
+go test ./tests -run TestGoja -v
+
 # Run tests with coverage
 make cover
 
@@ -58,19 +70,39 @@ echo "mkdir /tmp && echo hello > /tmp/f && cat /tmp/f" | go run .
 
 ```
 main.go                          → cmd.Execute()
-cmd/root.go                      → REPL loop + script-file mode (cobra)
-cmd/plugin.go                    → `plugin list` / `plugin install [python|ruby|<file>]` subcommands
-cmd/history.go                   → `history list` / `history show <hash>` — reads ~/.memsh/history/
-cmd/config.go                    → loads ~/.memsh/config.toml (TOML via BurntSushi/toml)
-cmd/complete.go                  → readline tab-completion (commands + virtual FS paths)
-cmd/version.go                   → `version` subcommand
-shell/                           → core library (Shell struct, builtins, WASM runtime)
-example/                         → standalone Go program showing shell.New() usage patterns
-shell/plugins/plugin.go          → Plugin / PluginInfo / ShellContext interfaces (package plugins)
-shell/plugins/native/            → native Go plugin implementations (base64, wc)
-shell/defaults.go                → registers defaultNativePlugins(); WASM embed hook
-shell/wasi_fs.go                 → afero→wazero sysfs adapter (writable WASI FS)
-scripts/                         → example memsh scripts (run with `go run . <script>`)
+cmd/                             → CLI commands (cobra)
+  root.go                        → REPL loop + script-file mode
+  plugin.go                      → plugin list / plugin install
+  history.go                     → history list / history show
+  config.go                      → ~/.memsh/config.toml loader
+  complete.go                    → Tab completion
+  version.go                     → version subcommand
+shell/                           → Core library
+  shell.go                       → Shell struct, New(), Run()
+  options.go                     → Functional options
+  builtins.go                    → Built-in command implementations
+  fs.go                          → File I/O handler (afero)
+  plugin.go                      → WASM plugin registry/loader
+  wasi_fs.go                     → afero → wazero sysfs adapter
+  defaults.go                    → Default native/WASM plugin registration
+  plugins/
+    plugin.go                    → Plugin / PluginInfo / ShellContext interfaces
+    native/                      → Native Go plugins (base64, wc, grep, find, awk, lua, goja)
+example/                         → Standalone usage examples
+scripts/                         → Example memsh scripts
+tests/                           → Test suite for plugins and commands
+  helper.go                      → NewTestShell() helper function
+  lua_test.go                    → Lua plugin tests
+  grep_test.go                   → Grep command tests
+  find_test.go                   → Find command tests
+  awk_test.go                    → AWK command tests
+  base64_test.go                 → Base64 command tests
+  wc_test.go                     → Word count tests
+  goja_test.go                   → JavaScript plugin tests
+  python_test.go                 → Python WASM plugin (placeholder)
+  ruby_test.go                   → Ruby WASM plugin (placeholder)
+web/                             → Project website (deployed to GitHub Pages)
+  index.html                     → Landing page with documentation
 ```
 
 **Shell execution flow:**
@@ -143,6 +175,7 @@ Native Go plugins in `shell/plugins/native/` provide additional commands:
 - `grep` — search file contents
 - `find` — search filesystem
 - `lua` — execute Lua code (via gopher-lua)
+- `goja` — execute JavaScript code (via goja, ES2020+ compatible)
 
 ## Plugin system
 
@@ -188,6 +221,40 @@ print(content)
 
 The Lua plugin uses gopher-lua (github.com/yuin/gopher-lua) and provides full Lua 5.1 compatibility.
 
+### JavaScript scripting
+
+memsh includes a JavaScript interpreter via goja (ES2020+ compatible). Execute JavaScript code directly:
+
+```bash
+# Inline execution
+goja -e 'console.log("hello")'
+goja -e 'console.log(2 + 3)'
+
+# Execute file from virtual FS
+goja /script.js
+
+# Read from stdin
+echo 'console.log("test")' | goja
+
+# Modern JavaScript features
+goja -e 'const arr = [1,2,3]; const doubled = arr.map(x => x * 2); console.log(doubled)'
+```
+
+JavaScript has access to the virtual filesystem via `fs.readFile()`:
+
+```javascript
+const content = fs.readFile("/data.txt");
+console.log(content);
+```
+
+The goja plugin uses `github.com/dop251/goja` and provides ES2020+ support including:
+- Arrow functions
+- Array methods (map, filter, reduce, etc.)
+- Template literals
+- Destructuring
+- Classes and modules (basic support)
+- Async/await (with limitations)
+
 ### WASM plugins (WASI)
 
 Standard Go programs compiled with `GOOS=wasip1 GOARCH=wasm`. They use `os.Stdin`/`os.Stdout`/`os.Args` normally. The virtual FS is mounted at `/` via `aferoSysFS`, so WASI file I/O goes directly into `afero.MemMapFs` — no temp-directory sync.
@@ -203,7 +270,7 @@ Two WASM module types:
 
 ### Plugin loading priority (first registration wins)
 1. `WithPluginBytes(name, wasm)` or `WithPlugin(p)` options
-2. Native plugins from `defaultNativePlugins()` (currently: `base64`, `wc`, `grep`, `find`, `awk`)
+2. Native plugins from `defaultNativePlugins()` (currently: `base64`, `wc`, `grep`, `find`, `awk`, `lua`, `goja`)
 3. WASM from `defaultPlugins` map (currently empty - can be used for embedded WASM)
 4. `/memsh/plugins/*.wasm` in the virtual FS
 5. `~/.memsh/plugins/*.wasm` on the real OS filesystem
@@ -220,10 +287,15 @@ Two WASM module types:
 
 ## Testing pattern
 
-**Standard test helper** (from `shell/shell_test.go`):
+**Test helper** (from `tests/helper.go`):
+
+The `tests/` directory provides `NewTestShell()` which creates a shell instance with:
+- stdout/stderr wired to a strings.Builder
+- WASM disabled for faster test execution
+- Customizable via shell.Option parameters
 
 ```go
-func newTestShell(t *testing.T, buf *bytes.Buffer, opts ...shell.Option) *shell.Shell {
+func NewTestShell(t testingT, buf *strings.Builder, opts ...shell.Option) *shell.Shell {
     t.Helper()
     base := []shell.Option{
         shell.WithStdIO(strings.NewReader(""), buf, buf),
@@ -237,22 +309,23 @@ func newTestShell(t *testing.T, buf *bytes.Buffer, opts ...shell.Option) *shell.
 }
 ```
 
-**Basic test**:
+**Basic plugin test** (from `tests/` directory):
 
 ```go
-func TestExample(t *testing.T) {
-    var out bytes.Buffer
-    sh := newTestShell(t, &out)
-
+func TestGoja(t *testing.T) {
     ctx := context.Background()
-    err := sh.Run(ctx, "mkdir /tmp && echo hello > /tmp/f && cat /tmp/f")
 
-    if err != nil {
-        t.Errorf("Run failed: %v", err)
-    }
-    if !strings.Contains(out.String(), "hello") {
-        t.Errorf("expected output not found")
-    }
+    t.Run("goja -e executes inline code", func(t *testing.T) {
+        var buf strings.Builder
+        s := NewTestShell(t, &buf, shell.WithFS(afero.NewMemMapFs()))
+        if err := s.Run(ctx, `goja -e 'console.log("hello")'`); err != nil {
+            t.Fatalf("unexpected error: %v", err)
+        }
+        out := strings.TrimSpace(buf.String())
+        if out != "hello" {
+            t.Errorf("expected 'hello', got %q", out)
+        }
+    })
 }
 ```
 
@@ -263,8 +336,8 @@ func TestWithFixture(t *testing.T) {
     fs := afero.NewMemMapFs()
     afero.WriteFile(fs, "/var/log/app.log", []byte("log line 1\nlog line 2\n"), 0644)
 
-    var out bytes.Buffer
-    sh := newTestShell(t, &out, shell.WithFS(fs))
+    var buf strings.Builder
+    sh := NewTestShell(t, &buf, shell.WithFS(fs))
 
     ctx := context.Background()
     sh.Run(ctx, "cat /var/log/app.log")
@@ -288,6 +361,11 @@ func realTmpDir(t *testing.T) string {
 
 **WASM is disabled in tests by default** for speed via `WithWASMEnabled(false)`.
 
+**Test organization**:
+- Each plugin has its own test file (e.g., `lua_test.go`, `goja_test.go`, `grep_test.go`)
+- All tests use the `tests` package and import `github.com/amjadjibon/memsh/shell`
+- Placeholder tests for future WASM plugins (python, ruby) use `t.Skip()` when not available
+
 ## Requirements
 
 - **Go 1.26+** (required for WASI support)
@@ -300,3 +378,4 @@ func realTmpDir(t *testing.T) string {
   - `github.com/chzyer/readline` — readline support
   - `github.com/spf13/cobra` — CLI framework
   - `github.com/yuin/gopher-lua` — Lua 5.1 interpreter
+  - `github.com/dop251/goja` — JavaScript ES2020+ interpreter

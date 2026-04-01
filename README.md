@@ -8,7 +8,8 @@ Shell parsing and interpretation is handled by [mvdan.cc/sh/v3](https://github.c
 
 - **In-memory filesystem** — all file operations target `afero.MemMapFs`; nothing touches your disk
 - **Bash-like syntax** — pipes, redirects (`>`, `>>`), `&&`, `;`, subshells via `mvdan.cc/sh`
-- **25+ built-in commands** — `cat`, `ls`, `mkdir`, `rm`, `cp`, `mv`, `grep`, `find`, `awk`, `sort`, `uniq`, `cut`, `tr`, `head`, `tail`, `diff`, `stat`, `wc`, `base64`, and more
+- **30+ built-in commands** — `cat`, `ls`, `mkdir`, `rm`, `cp`, `mv`, `grep`, `find`, `awk`, `sort`, `uniq`, `cut`, `tr`, `head`, `tail`, `diff`, `stat`, `wc`, `base64`, and more
+- **Scripting languages** — Lua (via gopher-lua) and JavaScript (via goja, ES2020+) support
 - **WASM plugin system** — extend the shell with WASI-compiled plugins (Go, Python, Ruby runtimes)
 - **Native Go plugins** — register custom commands via a simple `Plugin` interface
 - **Interactive REPL** — tab completion, command history, familiar prompt
@@ -113,6 +114,7 @@ sh.Run(ctx, "cat /var/log/app.log")
 | `wc` | Count lines, words, and bytes (`-l`, `-w`, `-c`) |
 | `base64` | Encode or decode base64 data (`-d`) |
 | `lua` | Execute Lua code using gopher-lua (`-e` for inline) |
+| `goja` | Execute JavaScript code using goja (`-e` for inline) |
 | `man` | Show help for commands |
 
 ## Plugin System
@@ -173,6 +175,50 @@ content = fs_readfile("/data.txt")
 print(content)
 ```
 
+### JavaScript Scripting
+
+memsh includes JavaScript support via goja (ES2020+ compatible):
+
+```bash
+# Execute inline JavaScript
+goja -e 'console.log("hello from goja")'
+goja -e 'console.log(2 + 3)'
+
+# Execute JavaScript file from virtual filesystem
+echo 'console.log("hello")' > /script.js
+goja /script.js
+
+# Pipe JavaScript code
+echo 'console.log("test")' | goja
+
+# Use JavaScript with pipes
+goja -e 'for(let i=0;i<10;i++) console.log(i)' | grep 5
+```
+
+JavaScript has access to filesystem via `fs.readFile()`:
+
+```javascript
+// Read file from virtual filesystem
+const content = fs.readFile("/data.txt");
+console.log(content);
+```
+
+Modern JavaScript features are supported:
+
+```javascript
+// Arrow functions
+goja -e 'const add = (a, b) => a + b; console.log(add(2, 3))'
+
+// Array methods
+goja -e 'const arr = [1,2,3]; const doubled = arr.map(x => x * 2); console.log(doubled)'
+
+// Template literals
+goja -e 'const name = "world"; console.log(`Hello, ${name}!`)'
+
+# Destructuring
+goja -e 'const {a, b} = {a: 1, b: 2}; console.log(a, b)'
+```
+
 ### WASM Plugins
 
 WASM plugins are compiled with `GOOS=wasip1 GOARCH=wasm`. They use standard `os.Stdin`/`os.Stdout`/`os.Args`. The virtual FS is mounted via WASI so file I/O goes directly into `afero.MemMapFs`.
@@ -192,7 +238,7 @@ go run . plugin install ruby
 ### Plugin Loading Priority
 
 1. `WithPluginBytes(name, wasm)` or `WithPlugin(p)` options
-2. Native plugins from `defaultNativePlugins()` (`base64`, `wc`, `grep`, `find`, `awk`, `lua`)
+2. Native plugins from `defaultNativePlugins()` (`base64`, `wc`, `grep`, `find`, `awk`, `lua`, `goja`)
 3. WASM from `defaultPlugins` map (embedded at compile time)
 4. `/memsh/plugins/*.wasm` in the virtual FS
 5. `~/.memsh/plugins/*.wasm` on the real OS filesystem
@@ -248,7 +294,7 @@ shell/                           → Core library
   defaults.go                    → Default native/WASM plugin registration
   plugins/
     plugin.go                    → Plugin / PluginInfo / ShellContext interfaces
-    native/                      → Native Go plugins (base64, wc, grep, find, awk, lua)
+    native/                      → Native Go plugins (base64, wc, grep, find, awk, lua, js)
 example/                         → Standalone usage examples
 scripts/                         → Example memsh scripts
 tests/                           → Test suite for plugins and commands
@@ -259,6 +305,7 @@ tests/                           → Test suite for plugins and commands
   awk_test.go                    → AWK command tests
   base64_test.go                 → Base64 command tests
   wc_test.go                     → Word count tests
+  goja_test.go                   → JavaScript plugin tests
   python_test.go                 → Python WASM plugin (placeholder)
   ruby_test.go                   → Ruby WASM plugin (placeholder)
 web/                             → Project website (deployed to GitHub Pages)
@@ -281,9 +328,10 @@ go test ./tests -run TestFind -v
 go test ./tests -run TestAwk -v
 go test ./tests -run TestBase64 -v
 go test ./tests -run TestWc -v
+go test ./tests -run TestGoja -v
 ```
 
-Tests use `afero.NewMemMapFs()` with `strings.Builder` for stdout/stderr capture. WASM is disabled in tests for speed via `WithWASMEnabled(false)`. The `tests/` directory contains comprehensive test coverage for all plugins (lua, grep, find, awk, base64, wc) with placeholder tests for future WASM plugins (python, ruby).
+Tests use `afero.NewMemMapFs()` with `strings.Builder` for stdout/stderr capture. WASM is disabled in tests for speed via `WithWASMEnabled(false)`. The `tests/` directory contains comprehensive test coverage for all plugins (lua, grep, find, awk, base64, wc, goja) with placeholder tests for future WASM plugins (python, ruby).
 
 ## Website
 
@@ -292,9 +340,10 @@ The project website is automatically deployed to GitHub Pages:
 - **Source**: `web/` directory
 - **Workflow**: `.github/workflows/static.yml`
 - **Trigger**: Push to `main` branch
-- **URL**: https://amjadjibon.github.io/memsh/
+- **URL**: <https://amjadjibon.github.io/memsh/>
 
 To update the website:
+
 1. Modify files in `web/` directory
 2. Commit and push to `main`
 3. GitHub Actions automatically deploys

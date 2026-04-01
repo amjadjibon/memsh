@@ -41,6 +41,14 @@ This directory contains comprehensive tests for memsh plugins and commands.
   - Byte counting with -c
   - Multiple file handling
 
+- **goja_test.go** - Tests for JavaScript (goja interpreter)
+  - Inline execution: `goja -e 'console.log("hello")'`
+  - File execution: `goja /script.js`
+  - Stdin input: `echo 'code' | goja`
+  - Math operations, modern JS features (arrow functions, array methods)
+  - Filesystem access via fs.readFile()
+  - Error handling for syntax errors
+
 ### Placeholder Tests (Future WASM Plugins)
 
 - **python_test.go** - Placeholder for Python WASM plugin
@@ -61,6 +69,7 @@ go test ./tests -run TestFind -v
 go test ./tests -run TestAwk -v
 go test ./tests -run TestBase64 -v
 go test ./tests -run TestWc -v
+go test ./tests -run TestGoja -v
 ```
 
 ## Test Helpers
