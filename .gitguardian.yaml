@@ -12,9 +12,9 @@ secret:
     - match: "*EXAMPLE_*"
       name: demo credentials for testing purposes
   ignored_paths:
-    # Ignore demo scripts that contain fake/example credentials
-    - scripts/secret-vault.sh
-    - scripts/config-manager.sh
+    # Ignore scripts directory (removed from repo)
+    - scripts/
+    # Ignore common documentation and test files
     - '**/README.md'
     - doc/*
     - LICENSE
