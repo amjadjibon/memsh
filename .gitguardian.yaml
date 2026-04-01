@@ -1,22 +1,14 @@
-# Required, otherwise ggshield considers the file to use the deprecated v1 format.
 version: 2
-# Set to true if the desired exit code for the CLI is always 0, otherwise the
-# exit code will be 1 if incidents are found.
-exit_zero: false # default: false
-verbose: false # default: false
-instance: https://dashboard.gitguardian.com # default: https://dashboard.gitguardian.com
+
+exit_zero: false
+verbose: false
+instance: https://dashboard.gitguardian.com
 
 secret:
   ignored_matches:
-    # Ignore demo/example credentials with EXAMPLE_ prefix
     - match: "*EXAMPLE_*"
       name: demo credentials for testing purposes
   ignored_paths:
-    # Ignore scripts directory (removed from repo)
-    - scripts/
-    # Ignore common documentation and test files
     - '**/README.md'
-    - doc/*
+    - docs/*
     - LICENSE
-    - .env
-    - 'tests/unit/cassettes/*'
