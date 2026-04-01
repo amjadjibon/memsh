@@ -1,68 +1,29 @@
 # memsh Test Suite
 
-This directory contains comprehensive tests for memsh plugins and commands.
+This directory contains integration tests for memsh plugins and commands. All tests run against the virtual in-memory filesystem with WASM disabled for speed.
 
 ## Test Files
 
-### Implemented Plugins
-
-- **lua_test.go** - Tests for Lua (gopher-lua interpreter)
-  - Inline execution: `lua -e 'print("hello")'`
-  - File execution: `lua /script.lua`
-  - Stdin input: `echo 'code' | lua`
-  - Math operations, tables, error handling
-
-- **grep_test.go** - Tests for grep command
-  - Pattern matching with -i (case-insensitive)
-  - Invert matching with -v
-  - Line numbers with -n
-  - Stdin pipe support
-
-- **find_test.go** - Tests for find command
-  - List all entries under path
-  - Filter by name glob patterns
-  - Filter by type (-f for files, -d for directories)
-
-- **awk_test.go** - Tests for AWK command (goawk)
-  - Field extraction: `awk '{print $2}'`
-  - File processing
-  - Program file: `awk -f /prog.awk`
-  - Built-in variables (NR, NF, etc.)
-
-- **base64_test.go** - Tests for base64 command
-  - Encode from stdin
-  - Decode with -d flag
-  - File encoding via cat pipe
-  - Positional argument encoding
-
-- **wc_test.go** - Tests for wc command
-  - Line counting with -l
-  - Word counting with -w
-  - Byte counting with -c
-  - Multiple file handling
-
-- **goja_test.go** - Tests for JavaScript (goja interpreter)
-  - Inline execution: `goja -e 'console.log("hello")'`
-  - File execution: `goja /script.js`
-  - Stdin input: `echo 'code' | goja`
-  - Math operations, modern JS features (arrow functions, array methods)
-  - Filesystem access via fs.readFile()
-  - Error handling for syntax errors
-
-### Placeholder Tests (Future WASM Plugins)
-
-- **python_test.go** - Placeholder for Python WASM plugin
-- **ruby_test.go** - Placeholder for Ruby WASM plugin
-
-These tests will skip when the plugins are not yet implemented.
+| File | Command | What's tested |
+|------|---------|---------------|
+| `awk_test.go` | `awk` | Field extraction, file processing, `-f` program file, NR/NF variables |
+| `base64_test.go` | `base64` | Encode from stdin, decode with `-d`, positional args |
+| `find_test.go` | `find` | List entries, `-name` glob, `-type f/d` |
+| `goja_test.go` | `goja` | Inline `-e`, file execution, stdin, modern JS, `fs.readFile()` |
+| `grep_test.go` | `grep` | Pattern match, `-i`, `-v`, `-n`, stdin pipe |
+| `jq_test.go` | `jq` | Field selection, `-r`, `-c`, `-n`, array iteration, virtual FS files, combined flags |
+| `lua_test.go` | `lua` | Inline `-e`, file execution, stdin, tables, `fs_readfile()` |
+| `wc_test.go` | `wc` | `-l`, `-w`, `-c`, multiple files |
+| `yq_test.go` | `yq` | YAML field selection, `-j` JSON output, `-jc` compact, `-r`, virtual FS files, JSON input |
+| `python_test.go` | `python` | Placeholder — skips when plugin not installed |
+| `ruby_test.go` | `ruby` | Placeholder — skips when plugin not installed |
 
 ## Running Tests
 
 ```bash
-# Run all tests in tests directory
-go test ./tests -v
-
-# Run specific test suite
+go test ./tests -v                   # all tests
+go test ./tests -run TestJq -v       # single suite
+go test ./tests -run TestYq -v
 go test ./tests -run TestLua -v
 go test ./tests -run TestGrep -v
 go test ./tests -run TestFind -v
@@ -72,18 +33,19 @@ go test ./tests -run TestWc -v
 go test ./tests -run TestGoja -v
 ```
 
-## Test Helpers
+## Test Helper
 
-The `helper.go` file provides `NewTestShell()` which creates a shell instance with:
-- stdout/stderr wired to a strings.Builder
-- WASM disabled for faster test execution
-- Customizable via shell.Option parameters
+`helper.go` provides `NewTestShell()`:
 
-## Test Organization
+```go
+var buf strings.Builder
+s := NewTestShell(t, &buf, shell.WithFS(afero.NewMemMapFs()))
+s.Run(ctx, `jq -r .name /data.json`)
+out := strings.TrimSpace(buf.String())
+```
 
-Each test file focuses on a single plugin/command, making it easy to:
-- Find tests for specific functionality
-- Add new test cases
-- Maintain clear separation of concerns
+- stdout and stderr both captured in `buf`
+- WASM disabled (`WithWASMEnabled(false)`)
+- Pass additional `shell.Option` values to customise
 
-All tests use the `tests` package and import `github.com/amjadjibon/memsh/shell` to test the shell as a black box.
+Pre-seed files with `afero.WriteFile(fs, "/path", []byte(...), 0644)` before creating the shell.
