@@ -30,6 +30,12 @@ go test ./shell/... -run TestName  # shell package tests
 
 Test suites in `tests/`: `TestAwk`, `TestBase64`, `TestFind`, `TestGrep`, `TestGoja`, `TestJq`, `TestLua`, `TestWc`, `TestYq`.
 
+```bash
+# HTTP server (sessions always enabled, TTL 30m default)
+go run . serve
+go run . serve --addr :3000 --session-ttl 1h --cors
+```
+
 ## Architecture
 
 ```
@@ -46,7 +52,7 @@ Shell.Run(ctx, script)
 ```
 
 **Key files:**
-- `shell/shell.go` — `Shell` struct, `New()`, one wazero runtime per shell, WASM pre-compiled at startup.
+- `shell/shell.go` — `Shell` struct, `New()`, one wazero runtime per shell, WASM pre-compiled at startup. After `Run`, `s.cwd = s.runner.Dir` syncs cwd.
 - `shell/builtins.go` — `execHandler` middleware; all built-in commands as a switch; flag parsing uses combined short-flag loop (e.g. `-rf`, `-la` work on all commands).
 - `shell/options.go` — all functional options: `WithFS`, `WithCwd`, `WithEnv`, `WithStdIO`, `WithPlugin`, `WithBuiltin`, `WithPluginBytes`, `WithWASMEnabled`, `WithPluginFilter`, `WithDisabledPlugins`, `WithAllowExternalCommands`.
 - `shell/fs.go` — `openHandler` wires all file I/O to afero; `resolvePath` always returns absolute paths.
@@ -54,6 +60,8 @@ Shell.Run(ctx, script)
 - `shell/wasi_fs.go` — `aferoSysFS`: implements `experimentalsys.FS` on top of `afero.Fs`, mounted via wazero so WASI modules read/write the virtual FS directly.
 - `shell/defaults.go` — `defaultNativePlugins()` and `defaultPlugins` WASM map.
 - `shell/plugins/plugin.go` — `Plugin`, `PluginInfo`, `ShellContext` interfaces; `ShellCtx(ctx)`, `WithShellContext()`.
+- `cmd/serve.go` — `memsh serve` HTTP server; sessions always enabled; `sessionStore` holds `afero.Fs` + `cwd` per session ID; each request creates a fresh `Shell` with `WithFS(entry.fs)` so I/O capture works per-request while FS mutations persist.
+- `web/terminal.html` — single-file browser terminal UI; embedded at compile time via `web/embed.go` (`//go:embed terminal.html`); served at `GET /`.
 
 ## Built-in commands
 
@@ -135,13 +143,30 @@ Pre-seed the filesystem with `afero.WriteFile(fs, "/path", []byte(...), 0644)`.
 
 `WithCwd` requires a real OS path (validated by `mvdan.cc/sh`). Use `os.MkdirTemp` if a non-root cwd is needed.
 
+## HTTP server (`memsh serve`)
+
+Sessions are **always enabled** — no flag needed. Send `X-Session-ID: <id>` on `POST /run` to persist FS state across requests.
+
+| Endpoint | Description |
+| --- | --- |
+| `GET /` | Web terminal UI (embedded `web/terminal.html`) |
+| `POST /run` | `{"script":"..."}` → `{"output":"...","cwd":"...","error":"..."}` |
+| `GET /sessions` | List active sessions (sorted by last use) |
+| `DELETE /session/{id}` | Destroy a session |
+| `GET /health` | `{"status":"ok","uptime":"...","sessions":N}` |
+
+**Session design:** `sessionEntry` stores `afero.Fs` (pointer — mutations persist across requests) + `cwd` string. Each request creates a new `Shell` with `WithFS(entry.fs)` and `WithStdIO(..., &out, &out)` so output is captured per-request while the FS is shared. `sh.Cwd()` is saved back to `entry.cwd` after each run.
+
+**Flags:** `--addr` (`:8080`), `--session-ttl` (`30m`), `--timeout` (`30s`), `--cors`.
+
 ## Critical implementation rules
 
 - **I/O**: always use `interp.HandlerCtx(ctx).Stdout/.Stdin` — never field `s.stdout` — so commands work correctly in pipes and redirects.
 - **Paths**: `resolvePath` always returns absolute paths with a leading `/`. `aferoSysFS.toAferoPath` prepends `/` because wazero passes paths without it.
 - **wazero lifecycle**: one `wazero.Runtime` per `Shell`. Modules compiled once at `New()`; only `InstantiateModule` called per invocation. Always call `shell.Close()`.
-- **`cd` limitation**: `mvdan.cc/sh` intercepts `cd` before `execHandler`, so `builtinCd` is unreachable. Scripts should use absolute virtual paths.
+- **`cd` limitation**: `mvdan.cc/sh` intercepts `cd` before `execHandler`, so `builtinCd` is unreachable. After `Run`, `s.cwd = s.runner.Dir` (real OS path joined from `realCwd`). When `realCwd = "/"` (default), virtual paths like `/hello` round-trip correctly.
 - **External commands**: `next(ctx, args)` (real OS execution) is only called when `s.allowExternalCmds` is true. Default is blocked with `"<cmd>: command not found"`.
+- **serve opts slice**: use `make([]shell.Option, len(baseOpts)+N)` + `copy` before appending per-request options — avoids Go slice aliasing across concurrent requests.
 
 ## Configuration
 
