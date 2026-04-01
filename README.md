@@ -89,7 +89,7 @@ sh.Run(ctx, "yq .host /config.yaml") // localhost
 ## Built-in Commands
 
 | Command | Description |
-|---------|-------------|
+| --- | --- |
 | `cat` | Concatenate and print files |
 | `cd` | Change working directory |
 | `chmod` | Change file permissions (`-R` recursive) |
@@ -209,7 +209,7 @@ go run . plugin install ruby     # install Ruby runtime
 ## Options
 
 | Option | Description |
-|--------|-------------|
+| --- | --- |
 | `WithFS(fs)` | Set the afero filesystem (default: `afero.NewMemMapFs()`) |
 | `WithCwd(path)` | Set initial working directory |
 | `WithEnv(env)` | Set initial environment variables |

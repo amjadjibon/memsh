@@ -5,7 +5,7 @@ This directory contains integration tests for memsh plugins and commands. All te
 ## Test Files
 
 | File | Command | What's tested |
-|------|---------|---------------|
+| --- | --- | --- |
 | `awk_test.go` | `awk` | Field extraction, file processing, `-f` program file, NR/NF variables |
 | `base64_test.go` | `base64` | Encode from stdin, decode with `-d`, positional args |
 | `find_test.go` | `find` | List entries, `-name` glob, `-type f/d` |
