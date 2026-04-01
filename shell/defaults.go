@@ -22,6 +22,7 @@ func defaultNativePlugins() []plugins.Plugin {
 		native.GrepPlugin{},
 		native.FindPlugin{},
 		native.AwkPlugin{},
+		native.LuaPlugin{},
 	}
 }
 

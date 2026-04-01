@@ -25,7 +25,7 @@ go build ./...
 go run .
 
 # Run a script
-go run . ./scripts/etl-pipeline.sh
+go run . ./path/to/script.sh
 
 # Pipe commands
 echo "mkdir /tmp && echo hello > /tmp/f && cat /tmp/f" | go run .
@@ -112,6 +112,7 @@ sh.Run(ctx, "cat /var/log/app.log")
 | `awk` | Pattern scanning and processing |
 | `wc` | Count lines, words, and bytes (`-l`, `-w`, `-c`) |
 | `base64` | Encode or decode base64 data (`-d`) |
+| `lua` | Execute Lua code using gopher-lua (`-e` for inline) |
 | `man` | Show help for commands |
 
 ## Plugin System
@@ -144,6 +145,34 @@ func (HelloPlugin) Run(ctx context.Context, args []string) error {
 
 Register via `shell.WithPlugin()` or add to `defaultNativePlugins()` in `shell/defaults.go`.
 
+### Lua Scripting
+
+memsh includes Lua support via gopher-lua:
+
+```bash
+# Execute inline Lua code
+lua -e 'print("hello from lua")'
+lua -e 'print(2 + 3)'
+
+# Execute Lua file from virtual filesystem
+echo 'print("hello")' > /script.lua
+lua /script.lua
+
+# Pipe Lua code
+echo 'for i=1,3 do print(i) end' | lua
+
+# Use Lua with pipes
+lua -e 'for i=1,10 do print(i) end' | grep 5
+```
+
+Lua has access to filesystem via `fs_readfile()`:
+
+```lua
+-- Read file from virtual filesystem
+content = fs_readfile("/data.txt")
+print(content)
+```
+
 ### WASM Plugins
 
 WASM plugins are compiled with `GOOS=wasip1 GOARCH=wasm`. They use standard `os.Stdin`/`os.Stdout`/`os.Args`. The virtual FS is mounted via WASI so file I/O goes directly into `afero.MemMapFs`.
@@ -163,7 +192,7 @@ go run . plugin install ruby
 ### Plugin Loading Priority
 
 1. `WithPluginBytes(name, wasm)` or `WithPlugin(p)` options
-2. Native plugins from `defaultNativePlugins()` (`base64`, `wc`, `grep`, `find`, `awk`)
+2. Native plugins from `defaultNativePlugins()` (`base64`, `wc`, `grep`, `find`, `awk`, `lua`)
 3. WASM from `defaultPlugins` map (embedded at compile time)
 4. `/memsh/plugins/*.wasm` in the virtual FS
 5. `~/.memsh/plugins/*.wasm` on the real OS filesystem
@@ -219,9 +248,21 @@ shell/                           → Core library
   defaults.go                    → Default native/WASM plugin registration
   plugins/
     plugin.go                    → Plugin / PluginInfo / ShellContext interfaces
-    native/                      → Native Go plugins (base64, wc, grep, find, awk)
+    native/                      → Native Go plugins (base64, wc, grep, find, awk, lua)
 example/                         → Standalone usage examples
 scripts/                         → Example memsh scripts
+tests/                           → Test suite for plugins and commands
+  helper.go                      → NewTestShell() helper function
+  lua_test.go                    → Lua plugin tests
+  grep_test.go                   → Grep command tests
+  find_test.go                   → Find command tests
+  awk_test.go                    → AWK command tests
+  base64_test.go                 → Base64 command tests
+  wc_test.go                     → Word count tests
+  python_test.go                 → Python WASM plugin (placeholder)
+  ruby_test.go                   → Ruby WASM plugin (placeholder)
+web/                             → Project website (deployed to GitHub Pages)
+  index.html                     → Landing page with documentation
 ```
 
 ## Testing
@@ -230,11 +271,33 @@ scripts/                         → Example memsh scripts
 # Run all tests
 go test ./...
 
-# Run a specific test
-go test ./shell/... -run TestBuiltins
+# Run tests in tests directory
+go test ./tests -v
+
+# Run specific test suite
+go test ./tests -run TestLua -v
+go test ./tests -run TestGrep -v
+go test ./tests -run TestFind -v
+go test ./tests -run TestAwk -v
+go test ./tests -run TestBase64 -v
+go test ./tests -run TestWc -v
 ```
 
-Tests use `afero.NewMemMapFs()` with `bytes.Buffer` for stdout/stderr capture. WASM is disabled in tests for speed via `WithWASMEnabled(false)`.
+Tests use `afero.NewMemMapFs()` with `strings.Builder` for stdout/stderr capture. WASM is disabled in tests for speed via `WithWASMEnabled(false)`. The `tests/` directory contains comprehensive test coverage for all plugins (lua, grep, find, awk, base64, wc) with placeholder tests for future WASM plugins (python, ruby).
+
+## Website
+
+The project website is automatically deployed to GitHub Pages:
+
+- **Source**: `web/` directory
+- **Workflow**: `.github/workflows/static.yml`
+- **Trigger**: Push to `main` branch
+- **URL**: https://amjadjibon.github.io/memsh/
+
+To update the website:
+1. Modify files in `web/` directory
+2. Commit and push to `main`
+3. GitHub Actions automatically deploys
 
 ## Requirements
 
