@@ -2,10 +2,14 @@ package cmd
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/subtle"
 	_ "embed"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"os/signal"
@@ -21,6 +25,12 @@ import (
 	"github.com/amjadjibon/memsh/shell"
 	"github.com/amjadjibon/memsh/web"
 )
+
+// maxRequestBodySize limits the size of incoming JSON request bodies (1 MB).
+const maxRequestBodySize = 1 << 20
+
+// minTimeout is the minimum enforced per-request timeout even if --timeout=0.
+const minTimeout = 5 * time.Second
 
 // runRequest is the JSON body accepted by POST /run.
 type runRequest struct {
@@ -61,27 +71,35 @@ type sessionEntry struct {
 
 // sessionStore manages persistent shell sessions keyed by an arbitrary ID.
 type sessionStore struct {
-	mu      sync.Mutex
-	entries map[string]*sessionEntry
-	ttl     time.Duration
+	mu         sync.Mutex
+	entries    map[string]*sessionEntry
+	ttl        time.Duration
+	maxEntries int
 }
 
-func newSessionStore(ttl time.Duration) *sessionStore {
+func newSessionStore(ttl time.Duration, maxEntries int) *sessionStore {
 	st := &sessionStore{
-		entries: make(map[string]*sessionEntry),
-		ttl:     ttl,
+		entries:    make(map[string]*sessionEntry),
+		ttl:        ttl,
+		maxEntries: maxEntries,
 	}
 	go st.reap()
 	return st
 }
 
 // get returns an existing session entry or creates one.
-func (st *sessionStore) get(id string) *sessionEntry {
+// Returns (entry, true) on success, or (nil, false) if the max session limit
+// would be exceeded by creating a new session.
+func (st *sessionStore) get(id string) (*sessionEntry, bool) {
 	st.mu.Lock()
 	defer st.mu.Unlock()
 	if e, ok := st.entries[id]; ok {
 		e.lastUse = time.Now()
-		return e
+		return e, true
+	}
+	// Enforce max-sessions limit.
+	if st.maxEntries > 0 && len(st.entries) >= st.maxEntries {
+		return nil, false
 	}
 	now := time.Now()
 	e := &sessionEntry{
@@ -91,7 +109,7 @@ func (st *sessionStore) get(id string) *sessionEntry {
 		lastUse:   now,
 	}
 	st.entries[id] = e
-	return e
+	return e, true
 }
 
 // updateCwd records the cwd after a request finishes so the next request in
@@ -166,7 +184,11 @@ Endpoints:
 
 Sessions are always enabled. Send X-Session-ID: <id> on POST /run to preserve
 virtual filesystem and working directory across requests. Sessions expire after
-the idle TTL (--session-ttl).`,
+the idle TTL (--session-ttl).
+
+Authentication:
+  Pass --api-key <key> to require authentication on mutating endpoints.
+  Clients must send the key via the Authorization header: "Bearer <key>".`,
 	RunE: runServe,
 }
 
@@ -174,17 +196,33 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	addr, _ := cmd.Flags().GetString("addr")
 	ttlStr, _ := cmd.Flags().GetString("session-ttl")
 	timeout, _ := cmd.Flags().GetDuration("timeout")
-	corsEnabled, _ := cmd.Flags().GetBool("cors")
+	corsOrigin, _ := cmd.Flags().GetString("cors-origin")
+	apiKey, _ := cmd.Flags().GetString("api-key")
+	maxSessions, _ := cmd.Flags().GetInt("max-sessions")
 
 	ttl, err := time.ParseDuration(ttlStr)
 	if err != nil {
 		return fmt.Errorf("invalid --session-ttl: %w", err)
 	}
 
+	// Enforce a minimum timeout to prevent unbounded execution.
+	if timeout <= 0 {
+		timeout = minTimeout
+	}
+
+	// Only enable auth if an API key was explicitly provided.
+	if cmd.Flags().Changed("api-key") && apiKey != "" {
+		fmt.Fprintln(os.Stderr, "memsh serve: API key authentication enabled")
+	}
+
 	cfg, _ := loadConfig()
 	baseOpts := buildShellOpts(cfg)
 
-	store := newSessionStore(ttl)
+	// In server mode, do not inherit the host process's environment
+	// to prevent leaking secrets (API keys, DB URLs, etc.) to remote users.
+	baseOpts = append(baseOpts, shell.WithInheritEnv(false))
+
+	store := newSessionStore(ttl, maxSessions)
 	start := time.Now()
 	mux := http.NewServeMux()
 
@@ -200,9 +238,12 @@ func runServe(cmd *cobra.Command, _ []string) error {
 
 	// ── POST /run ──────────────────────────────────────────────────────────
 	mux.HandleFunc("POST /run", func(w http.ResponseWriter, r *http.Request) {
+		// Limit request body size to prevent memory exhaustion.
+		r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
+
 		var req runRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeJSON(w, http.StatusBadRequest, runResponse{Error: "invalid JSON: " + err.Error()})
+			writeJSON(w, http.StatusBadRequest, runResponse{Error: "invalid request body"})
 			return
 		}
 		req.Script = strings.TrimSpace(req.Script)
@@ -212,11 +253,9 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		}
 
 		ctx := r.Context()
-		if timeout > 0 {
-			var cancel context.CancelFunc
-			ctx, cancel = context.WithTimeout(ctx, timeout)
-			defer cancel()
-		}
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
 
 		var out strings.Builder
 		opts := make([]shell.Option, len(baseOpts)+1)
@@ -225,13 +264,20 @@ func runServe(cmd *cobra.Command, _ []string) error {
 
 		sessionID := r.Header.Get("X-Session-ID")
 		if sessionID != "" {
-			entry := store.get(sessionID)
+			entry, ok := store.get(sessionID)
+			if !ok {
+				writeJSON(w, http.StatusTooManyRequests, runResponse{
+					Error: "maximum number of sessions reached",
+				})
+				return
+			}
 			opts = append(opts, shell.WithFS(entry.fs), shell.WithCwd(entry.cwd))
 		}
 
 		sh, err := shell.New(opts...)
 		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, runResponse{Error: "failed to start shell: " + err.Error()})
+			log.Printf("memsh serve: shell init error: %v", err)
+			writeJSON(w, http.StatusInternalServerError, runResponse{Error: "internal server error"})
 			return
 		}
 		defer sh.Close()
@@ -274,9 +320,20 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		})
 	})
 
+	// Build the middleware chain.
 	var handler http.Handler = mux
-	if corsEnabled {
-		handler = corsMiddleware(mux)
+
+	// API key authentication (applied to all endpoints except GET / and GET /health).
+	if apiKey != "" {
+		handler = apiKeyMiddleware(handler, apiKey)
+	}
+
+	// Security headers (CSP, etc.).
+	handler = securityHeadersMiddleware(handler)
+
+	// CORS (only if an explicit origin is configured).
+	if corsOrigin != "" {
+		handler = corsMiddleware(handler, corsOrigin)
 	}
 
 	srv := &http.Server{
@@ -298,7 +355,8 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		_ = srv.Shutdown(ctx)
 	}()
 
-	fmt.Fprintf(os.Stderr, "memsh serve: listening on %s  (session TTL %s)\n", addr, ttl)
+	fmt.Fprintf(os.Stderr, "memsh serve: listening on %s  (session TTL %s, max sessions %d, timeout %s)\n",
+		addr, ttl, maxSessions, timeout)
 
 	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return fmt.Errorf("memsh serve: %w", err)
@@ -327,11 +385,52 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
-func corsMiddleware(next http.Handler) http.Handler {
+// apiKeyMiddleware enforces Bearer token authentication on all endpoints except
+// GET / (web terminal static page) and GET /health (status check).
+func apiKeyMiddleware(next http.Handler, key string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
+		// Allow unauthenticated access to the static UI and health check.
+		if r.Method == http.MethodGet && (r.URL.Path == "/" || r.URL.Path == "/health") {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		authHeader := r.Header.Get("Authorization")
+		const prefix = "Bearer "
+		if !strings.HasPrefix(authHeader, prefix) {
+			http.Error(w, `{"error":"missing or invalid Authorization header"}`, http.StatusUnauthorized)
+			return
+		}
+
+		token := authHeader[len(prefix):]
+		if subtle.ConstantTimeCompare([]byte(token), []byte(key)) != 1 {
+			http.Error(w, `{"error":"invalid API key"}`, http.StatusForbidden)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
+// securityHeadersMiddleware adds Content-Security-Policy and other security
+// headers to all responses.
+func securityHeadersMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Security-Policy",
+			"default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; font-src 'self' https://fonts.googleapis.com https://fonts.gstatic.com")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("Referrer-Policy", "no-referrer")
+		next.ServeHTTP(w, r)
+	})
+}
+
+// corsMiddleware adds CORS headers for an explicit allowed origin.
+func corsMiddleware(next http.Handler, allowedOrigin string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", allowedOrigin)
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-Session-ID")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-Session-ID, Authorization")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
 			return
@@ -340,10 +439,21 @@ func corsMiddleware(next http.Handler) http.Handler {
 	})
 }
 
+// generateAPIKey creates a cryptographically random 32-byte hex-encoded API key.
+func generateAPIKey() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
+}
+
 func init() {
-	serveCmd.Flags().StringP("addr", "a", ":8080", "Address to listen on")
+	serveCmd.Flags().StringP("addr", "a", "127.0.0.1:8080", "Address to listen on (default binds to localhost only)")
 	serveCmd.Flags().String("session-ttl", "30m", "Idle TTL for sessions")
-	serveCmd.Flags().Duration("timeout", 30*time.Second, "Per-request execution timeout (0 = no timeout)")
-	serveCmd.Flags().Bool("cors", false, "Add CORS headers (Access-Control-Allow-Origin: *)")
+	serveCmd.Flags().Duration("timeout", 30*time.Second, "Per-request execution timeout (minimum 5s)")
+	serveCmd.Flags().String("cors-origin", "", "Allowed CORS origin (e.g. 'https://example.com'). Empty = no CORS headers.")
+	serveCmd.Flags().String("api-key", "", "API key for authentication. When set, mutating endpoints require 'Authorization: Bearer <key>'.")
+	serveCmd.Flags().Int("max-sessions", 100, "Maximum number of concurrent sessions (0 = unlimited)")
 	rootCmd.AddCommand(serveCmd)
 }

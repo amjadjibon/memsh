@@ -3,6 +3,7 @@ package shell
 import (
 	"context"
 	"io"
+	"maps"
 
 	"github.com/amjadjibon/memsh/shell/plugins"
 	"github.com/spf13/afero"
@@ -49,9 +50,7 @@ func WithCwd(cwd string) Option {
 // WithEnv sets initial environment variables.
 func WithEnv(env map[string]string) Option {
 	return func(s *Shell) {
-		for k, v := range env {
-			s.env[k] = v
-		}
+		maps.Copy(s.env, env)
 	}
 }
 
@@ -99,6 +98,16 @@ func WithPluginFilter(names []string) Option {
 func WithAllowExternalCommands(allow bool) Option {
 	return func(s *Shell) {
 		s.allowExternalCmds = allow
+	}
+}
+
+// WithInheritEnv controls whether the shell inherits the parent process's
+// environment variables. When false, only explicitly set variables (via WithEnv)
+// are available. Defaults to true for CLI use; should be false in server mode
+// to prevent leaking host secrets to remote users.
+func WithInheritEnv(inherit bool) Option {
+	return func(s *Shell) {
+		s.inheritEnv = inherit
 	}
 }
 

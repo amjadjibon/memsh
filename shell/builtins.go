@@ -2631,8 +2631,14 @@ func (s *Shell) builtinSleep(ctx context.Context, args []string) error {
 	if err != nil {
 		return fmt.Errorf("sleep: invalid time interval '%s'", args[1])
 	}
-	time.Sleep(time.Duration(d * float64(time.Second)))
-	return nil
+	timer := time.NewTimer(time.Duration(d * float64(time.Second)))
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func (s *Shell) builtinYes(ctx context.Context, args []string) error {
@@ -2642,7 +2648,14 @@ func (s *Shell) builtinYes(ctx context.Context, args []string) error {
 		msg = strings.Join(args[1:], " ")
 	}
 	for {
-		fmt.Fprintln(hc.Stdout, msg)
+		select {
+		case <-ctx.Done():
+			return nil
+		default:
+		}
+		if _, err := fmt.Fprintln(hc.Stdout, msg); err != nil {
+			return nil
+		}
 	}
 }
 
@@ -2746,12 +2759,26 @@ func (s *Shell) builtinXargs(ctx context.Context, args []string) error {
 	fullArgs := append([]string{cmdName}, cmdArgs...)
 	fullArgs = append(fullArgs, items...)
 
-	return s.execHandler(interp.DefaultExecHandler(2*time.Second))(ctx, fullArgs)
+	// Use a not-found handler as the fallback instead of DefaultExecHandler
+	// to prevent accidental real OS command execution.
+	notFound := func(_ context.Context, args []string) error {
+		return fmt.Errorf("%s: command not found", args[0])
+	}
+	return s.execHandler(notFound)(ctx, fullArgs)
 }
+
+// maxSourceDepth limits recursive `source` calls to prevent stack overflow.
+const maxSourceDepth = 16
 
 func (s *Shell) builtinSource(ctx context.Context, args []string) error {
 	if len(args) < 2 {
 		return fmt.Errorf("source: missing file argument")
+	}
+
+	s.sourceDepth++
+	defer func() { s.sourceDepth-- }()
+	if s.sourceDepth > maxSourceDepth {
+		return fmt.Errorf("source: maximum recursion depth (%d) exceeded", maxSourceDepth)
 	}
 
 	absPath := s.resolvePath(args[1])

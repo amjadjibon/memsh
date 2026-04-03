@@ -34,13 +34,15 @@ type Shell struct {
 
 	wasmEnabled          bool
 	allowExternalCmds    bool
+	inheritEnv           bool
 
 	pluginFilter map[string]struct{}
 
 	rt       wazero.Runtime
 	compiled map[string]wazero.CompiledModule
 
-	realCwd string
+	sourceDepth int
+	realCwd     string
 }
 
 type shellEnviron struct {
@@ -48,8 +50,13 @@ type shellEnviron struct {
 	parent expand.Environ
 }
 
-func newShellEnviron(env map[string]string) *shellEnviron {
-	parent := expand.ListEnviron(os.Environ()...)
+func newShellEnviron(env map[string]string, inheritEnv bool) *shellEnviron {
+	var parent expand.Environ
+	if inheritEnv {
+		parent = expand.ListEnviron(os.Environ()...)
+	} else {
+		parent = expand.ListEnviron()
+	}
 	return &shellEnviron{env: env, parent: parent}
 }
 
@@ -82,6 +89,7 @@ func New(opts ...Option) (*Shell, error) {
 		fds:         make(map[uint32]afero.File),
 		compiled:    make(map[string]wazero.CompiledModule),
 		wasmEnabled: true,
+		inheritEnv:  true,
 		realCwd:     "/",
 	}
 
@@ -104,7 +112,7 @@ func New(opts ...Option) (*Shell, error) {
 		s.realCwd = realCwd
 	}
 
-	shellEnv := newShellEnviron(s.env)
+	shellEnv := newShellEnviron(s.env, s.inheritEnv)
 
 	runner, err := interp.New(
 		interp.StdIO(s.stdin, s.stdout, s.stderr),

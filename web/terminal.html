@@ -237,12 +237,14 @@
     flex-shrink: 0;
   }
   .sess-current label { font-size: 10px; color: var(--dim); display: block; margin-bottom: 3px; }
-  #sess-id-input {
+  #sess-id-input,
+  #api-key-input {
     width: 100%;
     background: var(--bg); border: 1px solid var(--border); border-radius: 4px;
     padding: 4px 7px; color: var(--blue); font-family: var(--mono); font-size: 11px;
   }
-  #sess-id-input:focus { outline: 1px solid var(--blue); }
+  #sess-id-input:focus,
+  #api-key-input:focus { outline: 1px solid var(--blue); }
 
   /* spinner */
   @keyframes spin { to { transform: rotate(360deg); } }
@@ -301,6 +303,10 @@
       <div id="sess-empty">no sessions yet</div>
     </div>
     <div class="sess-current">
+      <label for="api-key-input">api key</label>
+      <input id="api-key-input" type="password" spellcheck="false" placeholder="paste API key…">
+    </div>
+    <div class="sess-current">
       <label for="sess-id-input">active session id</label>
       <input id="sess-id-input" type="text" spellcheck="false" placeholder="none (stateless)">
     </div>
@@ -323,6 +329,7 @@ const sessEmpty = document.getElementById('sess-empty');
 const newSessBtn  = document.getElementById('new-sess-btn');
 const delAllBtn   = document.getElementById('del-all-btn');
 const sessIdInput = document.getElementById('sess-id-input');
+const apiKeyInput = document.getElementById('api-key-input');
 
 // ── state ─────────────────────────────────────────────────────────────────────
 const hist = [];
@@ -334,6 +341,36 @@ let sessRefreshTimer = null;
 let currentSession = sessionStorage.getItem('memsh-session') || randomId();
 sessionStorage.setItem('memsh-session', currentSession);
 sessIdInput.value = currentSession;
+
+// Restore API key from sessionStorage.
+let apiKey = sessionStorage.getItem('memsh-api-key') || '';
+apiKeyInput.value = apiKey;
+
+function saveApiKey(showMsg) {
+  apiKey = apiKeyInput.value.trim();
+  if (apiKey) {
+    sessionStorage.setItem('memsh-api-key', apiKey);
+    if (showMsg) appendInfo('api key saved');
+  } else {
+    sessionStorage.removeItem('memsh-api-key');
+  }
+}
+
+apiKeyInput.addEventListener('input', () => saveApiKey(false));
+apiKeyInput.addEventListener('keydown', e => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    saveApiKey(true);
+    cmdEl.focus();
+  }
+});
+
+// Helper: build headers with optional auth and session.
+function authHeaders(extra) {
+  const h = Object.assign({}, extra || {});
+  if (apiKey) h['Authorization'] = 'Bearer ' + apiKey;
+  return h;
+}
 
 // ── sessions panel toggle ─────────────────────────────────────────────────────
 toggleBtn.addEventListener('click', () => {
@@ -386,7 +423,7 @@ delAllBtn.addEventListener('click', async () => {
 // ── sessions list ─────────────────────────────────────────────────────────────
 async function fetchSessions() {
   try {
-    const r = await fetch('/sessions');
+    const r = await fetch('/sessions', { headers: authHeaders() });
     if (!r.ok) return [];
     return await r.json();
   } catch { return []; }
@@ -394,7 +431,7 @@ async function fetchSessions() {
 
 async function deleteSession(id) {
   try {
-    await fetch(`/session/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    await fetch(`/session/${encodeURIComponent(id)}`, { method: 'DELETE', headers: authHeaders() });
   } catch { /* ignore */ }
 }
 
@@ -486,6 +523,15 @@ async function run() {
   const script = cmdEl.value;
   if (!script.trim()) return;
 
+  // Handle clear/reset client-side.
+  const trimmed = script.trim();
+  if (trimmed === 'clear' || trimmed === 'reset') {
+    cmdEl.value = '';
+    resize();
+    clearTerminal();
+    return;
+  }
+
   if (hist[0] !== script) hist.unshift(script);
   if (hist.length > 500) hist.pop();
   histIdx = -1; savedInput = '';
@@ -499,7 +545,7 @@ async function run() {
   cmdEl.disabled  = true;
   setStatus('busy', 'running…');
 
-  const headers = { 'Content-Type': 'application/json' };
+  const headers = authHeaders({ 'Content-Type': 'application/json' });
   if (currentSession) headers['X-Session-ID'] = currentSession;
 
   try {
