@@ -26,6 +26,7 @@ func defaultNativePlugins() []plugins.Plugin {
 		native.GojaPlugin{},
 		native.JqPlugin{},
 		native.YqPlugin{},
+		native.GitPlugin{},
 	}
 }
 
