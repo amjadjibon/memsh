@@ -1919,78 +1919,25 @@ func parseSymbolicMode(spec string) (os.FileMode, error) {
 	return mode, nil
 }
 
-func (s *Shell) builtinDiff(ctx context.Context, args []string) error {
-	hc := interp.HandlerCtx(ctx)
-	unified := false
-	var files []string
-	endOfFlags := false
-	for i := 1; i < len(args); i++ {
-		a := args[i]
-		if endOfFlags || a == "" || a[0] != '-' {
-			files = append(files, a)
-			continue
-		}
-		if a == "--" {
-			endOfFlags = true
-			continue
-		}
-		if a == "--unified" {
-			unified = true
-			continue
-		}
-		unknown := ""
-		for _, c := range a[1:] {
-			switch c {
-			case 'u':
-				unified = true
-			default:
-				unknown += string(c)
-			}
-		}
-		if unknown != "" {
-			return fmt.Errorf("diff: invalid option -- '%s'", unknown)
-		}
-	}
-	if len(files) < 2 {
-		return fmt.Errorf("diff: missing operand")
-	}
+// diffOpKind labels a single diff operation.
+type diffOpKind int
 
-	readFileLines := func(path string) ([]string, error) {
-		f, err := s.fs.Open(s.resolvePath(path))
-		if err != nil {
-			return nil, fmt.Errorf("diff: %s: %w", path, err)
-		}
-		defer f.Close()
-		var lines []string
-		sc := bufio.NewScanner(f)
-		for sc.Scan() {
-			lines = append(lines, sc.Text())
-		}
-		return lines, sc.Err()
-	}
+const (
+	diffKeep diffOpKind = iota
+	diffDelete
+	diffInsert
+)
 
-	a, err := readFileLines(files[0])
-	if err != nil {
-		return err
-	}
-	b, err := readFileLines(files[1])
-	if err != nil {
-		return err
-	}
-
-	edits := lcsEdits(a, b, unified, files[0], files[1])
-	changed := false
-	for _, e := range edits {
-		changed = true
-		fmt.Fprintln(hc.Stdout, e)
-	}
-	if changed {
-		return interp.ExitStatus(1)
-	}
-	return nil
+// diffOp is one operation from the LCS backtrack.
+type diffOp struct {
+	kind diffOpKind
+	aIdx int // 0-based index in slice a (Keep/Delete)
+	bIdx int // 0-based index in slice b (Keep/Insert)
+	line string
 }
 
-func lcsEdits(a, b []string, unified bool, fileA, fileB string) []string {
+// diffLCS builds the LCS DP table and backtracks to produce a diffOp slice.
+func diffLCS(a, b []string) []diffOp {
 	m, n := len(a), len(b)
 	dp := make([][]int, m+1)
 	for i := range dp {
@@ -2008,30 +1955,455 @@ func lcsEdits(a, b []string, unified bool, fileA, fileB string) []string {
 		}
 	}
 
-	var edits []string
+	ops := make([]diffOp, 0, m+n)
 	i, j := m, n
 	for i > 0 || j > 0 {
 		switch {
 		case i > 0 && j > 0 && a[i-1] == b[j-1]:
 			i--
 			j--
+			ops = append(ops, diffOp{diffKeep, i, j, a[i]})
 		case j > 0 && (i == 0 || dp[i][j-1] >= dp[i-1][j]):
-			edits = append(edits, "> "+b[j-1])
 			j--
+			ops = append(ops, diffOp{diffInsert, i, j, b[j]})
 		default:
-			edits = append(edits, "< "+a[i-1])
 			i--
+			ops = append(ops, diffOp{diffDelete, i, j, a[i]})
 		}
 	}
-	for l, r := 0, len(edits)-1; l < r; l, r = l+1, r-1 {
-		edits[l], edits[r] = edits[r], edits[l]
+	// reverse
+	for l, r := 0, len(ops)-1; l < r; l, r = l+1, r-1 {
+		ops[l], ops[r] = ops[r], ops[l]
+	}
+	return ops
+}
+
+func (s *Shell) builtinDiff(ctx context.Context, args []string) error {
+	hc := interp.HandlerCtx(ctx)
+
+	// flags
+	unified := false
+	ctxLines := 3
+	ignoreCase := false
+	ignoreSpace := false
+	ignoreAllSpace := false
+	quiet := false
+	color := false
+	var files []string
+
+	endOfFlags := false
+	for i := 1; i < len(args); i++ {
+		a := args[i]
+		if endOfFlags || a == "" || a[0] != '-' {
+			files = append(files, a)
+			continue
+		}
+		if a == "--" {
+			endOfFlags = true
+			continue
+		}
+		// long flags
+		if a == "--unified" {
+			unified = true
+			continue
+		}
+		if a == "--ignore-case" {
+			ignoreCase = true
+			continue
+		}
+		if a == "--ignore-space-change" {
+			ignoreSpace = true
+			continue
+		}
+		if a == "--ignore-all-space" {
+			ignoreAllSpace = true
+			continue
+		}
+		if a == "--quiet" || a == "--brief" {
+			quiet = true
+			continue
+		}
+		if a == "--color" || a == "--color=always" || a == "--color=auto" {
+			color = true
+			continue
+		}
+		if a == "--color=never" {
+			color = false
+			continue
+		}
+		// -U N
+		if a == "-U" && i+1 < len(args) {
+			fmt.Sscanf(args[i+1], "%d", &ctxLines)
+			i++
+			unified = true
+			continue
+		}
+		if len(a) > 2 && a[:2] == "-U" {
+			fmt.Sscanf(a[2:], "%d", &ctxLines)
+			unified = true
+			continue
+		}
+		// short flags
+		unknown := ""
+		for _, c := range a[1:] {
+			switch c {
+			case 'u':
+				unified = true
+			case 'i':
+				ignoreCase = true
+			case 'b':
+				ignoreSpace = true
+			case 'w':
+				ignoreAllSpace = true
+			case 'q':
+				quiet = true
+			default:
+				unknown += string(c)
+			}
+		}
+		if unknown != "" {
+			fmt.Fprintf(hc.Stderr, "diff: invalid option -- '%s'\n", unknown)
+			return interp.ExitStatus(2)
+		}
+	}
+
+	if len(files) < 2 {
+		fmt.Fprintln(hc.Stderr, "diff: missing operand")
+		return interp.ExitStatus(2)
+	}
+
+	readFileLines := func(path string) ([]string, error) {
+		f, err := s.fs.Open(s.resolvePath(path))
+		if err != nil {
+			return nil, fmt.Errorf("diff: %s: %w", path, err)
+		}
+		defer f.Close()
+		var lines []string
+		sc := bufio.NewScanner(f)
+		for sc.Scan() {
+			lines = append(lines, sc.Text())
+		}
+		return lines, sc.Err()
+	}
+
+	normalise := func(line string) string {
+		if ignoreAllSpace {
+			// remove all whitespace
+			var buf []byte
+			for _, c := range line {
+				if c != ' ' && c != '\t' {
+					buf = append(buf, string(c)...)
+				}
+			}
+			if ignoreCase {
+				return strings.ToLower(string(buf))
+			}
+			return string(buf)
+		}
+		if ignoreSpace {
+			// collapse runs of whitespace
+			prev := ' '
+			var buf []byte
+			for _, c := range line {
+				if c == ' ' || c == '\t' {
+					if prev != ' ' {
+						buf = append(buf, ' ')
+					}
+					prev = ' '
+				} else {
+					buf = append(buf, string(c)...)
+					prev = c
+				}
+			}
+			return strings.TrimRight(string(buf), " ")
+		}
+		if ignoreCase {
+			return strings.ToLower(line)
+		}
+		return line
+	}
+
+	rawA, err := readFileLines(files[0])
+	if err != nil {
+		return err
+	}
+	rawB, err := readFileLines(files[1])
+	if err != nil {
+		return err
+	}
+
+	// build normalised copies for comparison
+	normA := make([]string, len(rawA))
+	normB := make([]string, len(rawB))
+	for i, l := range rawA {
+		normA[i] = normalise(l)
+	}
+	for i, l := range rawB {
+		normB[i] = normalise(l)
+	}
+
+	ops := diffLCS(normA, normB)
+
+	// check if any changes exist
+	changed := false
+	for _, op := range ops {
+		if op.kind != diffKeep {
+			changed = true
+			break
+		}
+	}
+
+	if !changed {
+		return nil
+	}
+
+	if quiet {
+		fmt.Fprintf(hc.Stdout, "Files %s and %s differ\n", files[0], files[1])
+		return interp.ExitStatus(1)
+	}
+
+	// ANSI helpers
+	ansiRed := "\033[31m"
+	ansiGreen := "\033[32m"
+	ansiCyan := "\033[36m"
+	ansiBoldDiff := "\033[1m"
+	ansiResetDiff := "\033[0m"
+	col := func(code, text string) string {
+		if !color {
+			return text
+		}
+		return code + text + ansiResetDiff
 	}
 
 	if unified {
-		header := []string{"--- " + fileA, "+++ " + fileB}
-		return append(header, edits...)
+		// unified diff output
+		fmt.Fprintln(hc.Stdout, col(ansiBoldDiff, "--- "+files[0]))
+		fmt.Fprintln(hc.Stdout, col(ansiBoldDiff, "+++ "+files[1]))
+
+		// build hunks by scanning ops
+		opLen := len(ops)
+		i := 0
+		for i < opLen {
+			// find next changed op
+			if ops[i].kind == diffKeep {
+				i++
+				continue
+			}
+			// found a change; determine hunk bounds
+			start := i - ctxLines
+			if start < 0 {
+				start = 0
+			}
+			// extend to include all changes within ctxLines of each other
+			end := i
+			for end < opLen {
+				if ops[end].kind != diffKeep {
+					// look ahead ctxLines for another change
+					lookahead := end + 1
+					for lookahead < opLen && lookahead <= end+ctxLines {
+						if ops[lookahead].kind != diffKeep {
+							end = lookahead
+							break
+						}
+						lookahead++
+					}
+					if lookahead > end+ctxLines || lookahead >= opLen {
+						end++
+						break
+					}
+				}
+				end++
+			}
+			// add trailing context
+			hunkEnd := end + ctxLines - 1
+			if hunkEnd >= opLen {
+				hunkEnd = opLen - 1
+			}
+
+			hunkOps := ops[start : hunkEnd+1]
+
+			// compute line ranges
+			aStart, bStart := -1, -1
+			aCount, bCount := 0, 0
+			for _, op := range hunkOps {
+				switch op.kind {
+				case diffKeep:
+					if aStart == -1 {
+						aStart = op.aIdx + 1
+						bStart = op.bIdx + 1
+					}
+					aCount++
+					bCount++
+				case diffDelete:
+					if aStart == -1 {
+						aStart = op.aIdx + 1
+					}
+					aCount++
+				case diffInsert:
+					if bStart == -1 {
+						bStart = op.bIdx + 1
+					}
+					bCount++
+				}
+			}
+			if aStart == -1 {
+				aStart = 1
+			}
+			if bStart == -1 {
+				bStart = 1
+			}
+
+			// format hunk header
+			aRange := fmt.Sprintf("%d", aStart)
+			if aCount != 1 {
+				aRange = fmt.Sprintf("%d,%d", aStart, aCount)
+			}
+			bRange := fmt.Sprintf("%d", bStart)
+			if bCount != 1 {
+				bRange = fmt.Sprintf("%d,%d", bStart, bCount)
+			}
+			header := fmt.Sprintf("@@ -%s +%s @@", aRange, bRange)
+			fmt.Fprintln(hc.Stdout, col(ansiCyan, header))
+
+			for _, op := range hunkOps {
+				switch op.kind {
+				case diffKeep:
+					fmt.Fprintln(hc.Stdout, " "+rawA[op.aIdx])
+				case diffDelete:
+					fmt.Fprintln(hc.Stdout, col(ansiRed, "-"+rawA[op.aIdx]))
+				case diffInsert:
+					fmt.Fprintln(hc.Stdout, col(ansiGreen, "+"+rawB[op.bIdx]))
+				}
+			}
+
+			i = hunkEnd + 1
+		}
+	} else {
+		// normal (ed-style) diff output
+		// group consecutive changes into hunks
+		i := 0
+		for i < len(ops) {
+			if ops[i].kind == diffKeep {
+				i++
+				continue
+			}
+			// collect a run of changes
+			j := i
+			for j < len(ops) && ops[j].kind != diffKeep {
+				j++
+			}
+			chunk := ops[i:j]
+
+			// determine ranges
+			aStart, aEnd := -1, -1
+			bStart, bEnd := -1, -1
+			for _, op := range chunk {
+				switch op.kind {
+				case diffDelete:
+					if aStart == -1 {
+						aStart = op.aIdx + 1
+					}
+					aEnd = op.aIdx + 1
+				case diffInsert:
+					if bStart == -1 {
+						bStart = op.bIdx + 1
+					}
+					bEnd = op.bIdx + 1
+				}
+			}
+
+			hasDelete := aStart != -1
+			hasInsert := bStart != -1
+
+			var rangeA, rangeB string
+			if hasDelete {
+				if aStart == aEnd {
+					rangeA = fmt.Sprintf("%d", aStart)
+				} else {
+					rangeA = fmt.Sprintf("%d,%d", aStart, aEnd)
+				}
+			}
+			if hasInsert {
+				if bStart == bEnd {
+					rangeB = fmt.Sprintf("%d", bStart)
+				} else {
+					rangeB = fmt.Sprintf("%d,%d", bStart, bEnd)
+				}
+			}
+
+			// determine command character
+			var cmd string
+			switch {
+			case hasDelete && hasInsert:
+				cmd = "c"
+				if !hasDelete {
+					rangeA = fmt.Sprintf("%d", aStart)
+				}
+			case hasDelete:
+				cmd = "d"
+			case hasInsert:
+				cmd = "a"
+				if aStart == -1 {
+					// pure insert: find preceding keep
+					for k := i - 1; k >= 0; k-- {
+						if ops[k].kind == diffKeep {
+							rangeA = fmt.Sprintf("%d", ops[k].aIdx+1)
+							break
+						}
+					}
+					if rangeA == "" {
+						rangeA = "0"
+					}
+				}
+			}
+
+			// build header
+			var header string
+			switch cmd {
+			case "c":
+				header = rangeA + "c" + rangeB
+			case "d":
+				header = rangeA + "d" + fmt.Sprintf("%d", func() int {
+					// line in b after which lines were deleted
+					for k := i - 1; k >= 0; k-- {
+						if ops[k].kind == diffKeep {
+							return ops[k].bIdx + 1
+						}
+					}
+					return 0
+				}())
+			case "a":
+				header = rangeA + "a" + rangeB
+			}
+
+			fmt.Fprintln(hc.Stdout, col(ansiCyan, header))
+
+			// print deleted lines
+			if hasDelete {
+				for _, op := range chunk {
+					if op.kind == diffDelete {
+						fmt.Fprintln(hc.Stdout, col(ansiRed, "< "+rawA[op.aIdx]))
+					}
+				}
+			}
+			// separator between delete and insert
+			if hasDelete && hasInsert {
+				fmt.Fprintln(hc.Stdout, "---")
+			}
+			// print inserted lines
+			if hasInsert {
+				for _, op := range chunk {
+					if op.kind == diffInsert {
+						fmt.Fprintln(hc.Stdout, col(ansiGreen, "> "+rawB[op.bIdx]))
+					}
+				}
+			}
+
+			i = j
+		}
 	}
-	return edits
+
+	return interp.ExitStatus(1)
 }
 
 func (s *Shell) builtinStat(ctx context.Context, args []string) error {
