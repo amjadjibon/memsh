@@ -34,6 +34,8 @@ func defaultNativePlugins() []plugins.Plugin {
 		native.SHA256Sum(),
 		native.SHA384Sum(),
 		native.SHA512Sum(),
+		native.XxdPlugin{},
+		native.HexdumpPlugin{},
 		native.TarPlugin{},
 		native.Gzip(),
 		native.Gunzip(),
