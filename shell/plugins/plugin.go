@@ -40,6 +40,13 @@ type PluginInfo interface {
 	Usage() string
 }
 
+// CommandInfo describes a registered command for help/which style introspection.
+type CommandInfo struct {
+	Kind        string
+	Description string
+	Usage       string
+}
+
 // ShellContext provides access to shell-level state inside a Plugin.Run call.
 // Retrieve it with ShellCtx(ctx).
 type ShellContext struct {
@@ -49,8 +56,28 @@ type ShellContext struct {
 	Cwd string
 	// Env looks up a shell environment variable by key.
 	Env func(key string) string
+	// EnvAll returns a copy of the current shell environment.
+	EnvAll func() map[string]string
+	// SetEnv updates a shell environment variable.
+	SetEnv func(key, value string)
 	// ResolvePath converts a possibly-relative path to an absolute virtual path.
 	ResolvePath func(path string) string
+	// SetCwd changes the shell's working directory.
+	SetCwd func(path string) error
+	// Run executes a script in the current shell.
+	Run func(ctx context.Context, script string) error
+	// Exec executes a command argv through the shell command resolver.
+	Exec func(ctx context.Context, args []string) error
+	// Exit requests shell termination.
+	Exit func() error
+	// AliasLookup resolves a shell alias by name.
+	AliasLookup func(name string) (string, bool)
+	// CommandInfo returns metadata for a known command.
+	CommandInfo func(name string) (CommandInfo, bool)
+	// CommandNames returns the known command names.
+	CommandNames func() []string
+	// SourceFile sources a path or URL in the current shell context.
+	SourceFile func(ctx context.Context, path string) error
 }
 
 type ctxKey struct{}

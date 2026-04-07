@@ -353,7 +353,7 @@ func openDB(sc plugins.ShellContext, dbPath string) (*sql.DB, func(), error) {
 }
 
 // splitStatements splits a SQL string into individual statements. It honours:
-//   - single-quoted string literals  ('it''s fine')
+//   - single-quoted string literals  ('it”s fine')
 //   - double-quoted identifiers      ("col name")
 //   - back-tick identifiers          (`col name`)
 //   - block comments                 /* ... */

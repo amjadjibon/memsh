@@ -21,9 +21,7 @@ func startScriptServer(t *testing.T, scripts map[string]string) *httptest.Server
 			fmt.Fprint(w, body)
 		})
 	}
-	srv := httptest.NewServer(mux)
-	t.Cleanup(srv.Close)
-	return srv
+	return newLoopbackHTTPServer(t, mux)
 }
 
 func TestSourceURL(t *testing.T) {
@@ -134,8 +132,7 @@ func TestSourceURLChained(t *testing.T) {
 	mux.HandleFunc("/a.sh", func(w http.ResponseWriter, _ *http.Request) {
 		fmt.Fprintf(w, "source %s/b.sh", srvReal.URL)
 	})
-	srvReal = httptest.NewServer(mux)
-	t.Cleanup(srvReal.Close)
+	srvReal = newLoopbackHTTPServer(t, mux)
 	_ = srv // unused placeholder, srvReal is the real server
 
 	var buf strings.Builder

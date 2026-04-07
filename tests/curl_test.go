@@ -53,9 +53,7 @@ func newCurlTestServer(t *testing.T) *httptest.Server {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("ua=" + ua + " auth=" + auth))
 	})
-	srv := httptest.NewServer(mux)
-	t.Cleanup(srv.Close)
-	return srv
+	return newLoopbackHTTPServer(t, mux)
 }
 
 func TestCurl(t *testing.T) {

@@ -99,7 +99,7 @@ func (p LessPlugin) Run(ctx context.Context, args []string) error {
 					showNumbers = true
 				case 'n':
 					showNumbers = false
-				// all other flags silently ignored
+					// all other flags silently ignored
 				}
 			}
 			continue
