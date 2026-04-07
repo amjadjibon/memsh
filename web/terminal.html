@@ -339,6 +339,33 @@
   }
   #pager-search-label { color: var(--green); }
   #pager-search-count { color: var(--dim); font-size: 11px; }
+
+  /* ── tab completion dropdown ── */
+  #completion-dropdown {
+    position: fixed;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    max-height: 220px;
+    overflow-y: auto;
+    z-index: 100;
+    box-shadow: 0 -4px 16px rgba(0,0,0,.5);
+    min-width: 160px;
+  }
+  #completion-dropdown::-webkit-scrollbar { width: 4px; }
+  #completion-dropdown::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+  .completion-item {
+    padding: 5px 14px;
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--text);
+    cursor: pointer;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .completion-item:hover { background: var(--surface); color: var(--blue); }
+  .completion-item.completion-active { background: var(--surface); color: var(--green2); }
 </style>
 </head>
 <body>
@@ -363,7 +390,7 @@
   <main id="main">
     <div class="welcome">
       <div class="welcome-title">memsh</div>
-      <div>virtual sandboxed shell &nbsp;·&nbsp; Enter to run &nbsp;·&nbsp; Shift+Enter newline &nbsp;·&nbsp; ↑↓ history &nbsp;·&nbsp; Ctrl+L clear</div>
+      <div>virtual sandboxed shell &nbsp;·&nbsp; Enter to run &nbsp;·&nbsp; Shift+Enter newline &nbsp;·&nbsp; Tab complete &nbsp;·&nbsp; ↑↓ history &nbsp;·&nbsp; Ctrl+L clear</div>
     </div>
   </main>
 
@@ -443,6 +470,9 @@ const hist = [];
 let histIdx = -1, savedInput = '';
 let sessionsOpen = false;
 let sessRefreshTimer = null;
+
+// Tab-completion state
+let completionState = null; // {prefix, afterCursor, items, index}
 
 // Restore or create session ID (persists across page reloads)
 let currentSession = sessionStorage.getItem('memsh-session') || randomId();
@@ -940,11 +970,116 @@ function resize() {
   cmdEl.style.height = 'auto';
   cmdEl.style.height = Math.min(cmdEl.scrollHeight, 160) + 'px';
 }
-cmdEl.addEventListener('input', resize);
+cmdEl.addEventListener('input', () => { resize(); hideCompletion(); });
+
+// ── tab completion ─────────────────────────────────────────────────────────────
+async function triggerComplete() {
+  const input  = cmdEl.value;
+  const cursor = cmdEl.selectionStart ?? input.length;
+  const headers = {'Content-Type': 'application/json'};
+  if (apiKey) headers['Authorization'] = 'Bearer ' + apiKey;
+  if (currentSession) headers['X-Session-ID'] = currentSession;
+  try {
+    const resp = await fetch('/complete', {
+      method: 'POST', headers,
+      body: JSON.stringify({input, cursor})
+    });
+    if (!resp.ok) return;
+    const data = await resp.json();
+    handleCompletions(data, input, cursor);
+  } catch (_) {}
+}
+
+function handleCompletions({completions, prefix}, input, cursor) {
+  if (!completions || completions.length === 0) return;
+  const afterCursor = input.slice(cursor);
+  if (completions.length === 1) {
+    applyCompletion(completions[0], prefix, afterCursor);
+    return;
+  }
+  completionState = {prefix, afterCursor, items: completions, index: -1};
+  renderCompletion();
+}
+
+function applyCompletion(item, prefix, afterCursor) {
+  const value = prefix + item + afterCursor;
+  cmdEl.value = value;
+  const pos = (prefix + item).length;
+  cmdEl.selectionStart = cmdEl.selectionEnd = pos;
+  resize();
+  hideCompletion();
+}
+
+function renderCompletion() {
+  hideCompletion();
+  if (!completionState) return;
+  const {items, index} = completionState;
+
+  const dropdown = document.createElement('div');
+  dropdown.id = 'completion-dropdown';
+  items.forEach((item, i) => {
+    const el = document.createElement('div');
+    el.className = 'completion-item' + (i === index ? ' completion-active' : '');
+    el.textContent = item;
+    el.addEventListener('mousedown', ev => { ev.preventDefault(); selectCompletion(i); });
+    dropdown.appendChild(el);
+  });
+
+  // Position above the input bar
+  const inpRect = document.getElementById('inp').getBoundingClientRect();
+  dropdown.style.left   = (inpRect.left + 10) + 'px';
+  dropdown.style.bottom = (window.innerHeight - inpRect.top + 6) + 'px';
+  dropdown.style.maxWidth = (inpRect.width - 20) + 'px';
+  document.body.appendChild(dropdown);
+
+  // Scroll active item into view
+  if (index >= 0) {
+    dropdown.querySelectorAll('.completion-item')[index]?.scrollIntoView({block:'nearest'});
+  }
+}
+
+function hideCompletion() {
+  document.getElementById('completion-dropdown')?.remove();
+  completionState = null;
+}
+
+function selectCompletion(i) {
+  if (!completionState) return;
+  applyCompletion(completionState.items[i], completionState.prefix, completionState.afterCursor);
+}
 
 // ── keyboard ──────────────────────────────────────────────────────────────────
 cmdEl.addEventListener('keydown', e => {
+  // Tab: trigger or navigate completion
+  if (e.key === 'Tab') {
+    e.preventDefault();
+    if (completionState) {
+      const n = completionState.items.length;
+      completionState.index = e.shiftKey
+        ? ((completionState.index - 1) + n) % n
+        : (completionState.index + 1) % n;
+      renderCompletion();
+      // Preview highlighted item in input without dismissing dropdown
+      const {prefix, afterCursor, items, index} = completionState;
+      cmdEl.value = prefix + items[index] + afterCursor;
+      cmdEl.selectionStart = cmdEl.selectionEnd = (prefix + items[index]).length;
+      resize();
+    } else {
+      triggerComplete();
+    }
+    return;
+  }
+  // Escape: close completion dropdown
+  if (e.key === 'Escape' && completionState) {
+    hideCompletion(); return;
+  }
+  // Enter: if item is highlighted in dropdown, apply it; else run command
   if (e.key === 'Enter' && !e.shiftKey) {
+    if (completionState && completionState.index >= 0) {
+      e.preventDefault();
+      selectCompletion(completionState.index);
+      return;
+    }
     e.preventDefault(); run(); return;
   }
   if (e.key === 'l' && e.ctrlKey) {
@@ -953,6 +1088,7 @@ cmdEl.addEventListener('keydown', e => {
     return;
   }
   if (e.key === 'ArrowUp' && !e.shiftKey) {
+    if (completionState) { hideCompletion(); }
     if (!hist.length) return;
     e.preventDefault();
     if (histIdx === -1) savedInput = cmdEl.value;
@@ -962,6 +1098,7 @@ cmdEl.addEventListener('keydown', e => {
     return;
   }
   if (e.key === 'ArrowDown' && !e.shiftKey) {
+    if (completionState) { hideCompletion(); }
     e.preventDefault();
     if (histIdx <= 0) { histIdx = -1; cmdEl.value = savedInput; }
     else { histIdx--; cmdEl.value = hist[histIdx]; }

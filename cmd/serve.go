@@ -44,6 +44,12 @@ type runRequest struct {
 	Script string `json:"script"`
 }
 
+// completeRequest is the JSON body accepted by POST /complete.
+type completeRequest struct {
+	Input  string `json:"input"`
+	Cursor int    `json:"cursor"` // optional; defaults to len(input) when 0
+}
+
 // runResponse is the JSON body returned by POST /run.
 type runResponse struct {
 	Output string `json:"output"`
@@ -450,6 +456,34 @@ func runServe(cmd *cobra.Command, _ []string) error {
 			Uptime:   time.Since(start).Round(time.Second).String(),
 			Sessions: store.count(),
 		})
+	})
+
+	// ── POST /complete ─────────────────────────────────────────────────────
+	// Returns tab-completion candidates for the given input and cursor position.
+	// Uses the session's virtual FS (if X-Session-ID is provided) for path
+	// completions, and the static default command list for command completions.
+	mux.HandleFunc("POST /complete", func(w http.ResponseWriter, r *http.Request) {
+		r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
+		var req completeRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
+			return
+		}
+		if req.Cursor <= 0 {
+			req.Cursor = len(req.Input)
+		}
+
+		var fs afero.Fs = afero.NewMemMapFs()
+		cwd := "/"
+		if sessionID := r.Header.Get("X-Session-ID"); sessionID != "" {
+			if entry, ok := store.get(sessionID); ok {
+				fs = entry.fs
+				cwd = entry.cwd
+			}
+		}
+
+		result := shell.Complete(req.Input, req.Cursor, fs, cwd, shell.DefaultCommands())
+		writeJSON(w, http.StatusOK, result)
 	})
 
 	// Build the middleware chain.

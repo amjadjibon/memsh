@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/amjadjibon/memsh/shell/plugins"
@@ -191,6 +192,62 @@ func (s *Shell) Cwd() string {
 
 func (s *Shell) FS() afero.Fs {
 	return s.fs
+}
+
+// builtinCmdNames is the static list of commands handled by the execHandler switch.
+var builtinCmdNames = []string{
+	"cat", "cp", "mv", "rm", "touch", "mkdir", "rmdir", "ln",
+	"ls", "cd", "pwd", "du", "df",
+	"echo", "printf", "head", "tail", "sort", "uniq", "cut", "tr",
+	"grep", "sed", "stat", "diff", "wc", "chmod", "tee", "xargs",
+	"read", "seq", "date", "sleep", "yes", "env", "which",
+	"source", ".", "clear", "reset", "help", "exit",
+	"alias", "unalias", "true", "false",
+}
+
+// Commands returns all command names known to this shell instance:
+// the static builtin list, registered native plugins, and loaded WASM plugins.
+func (s *Shell) Commands() []string {
+	seen := make(map[string]bool, len(builtinCmdNames)+len(s.builtins)+len(s.compiled))
+	var names []string
+	add := func(name string) {
+		if !seen[name] {
+			seen[name] = true
+			names = append(names, name)
+		}
+	}
+	for _, n := range builtinCmdNames {
+		add(n)
+	}
+	for n := range s.builtins {
+		add(n)
+	}
+	for n := range s.compiled {
+		add(n)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// DefaultCommands returns all command names available in a default shell
+// (static builtins + default native plugins) without creating a Shell instance.
+func DefaultCommands() []string {
+	seen := make(map[string]bool, len(builtinCmdNames)+8)
+	var names []string
+	add := func(name string) {
+		if !seen[name] {
+			seen[name] = true
+			names = append(names, name)
+		}
+	}
+	for _, n := range builtinCmdNames {
+		add(n)
+	}
+	for _, p := range defaultNativePlugins() {
+		add(p.Name())
+	}
+	sort.Strings(names)
+	return names
 }
 
 func (s *Shell) ListDir(path string) ([]string, error) {
