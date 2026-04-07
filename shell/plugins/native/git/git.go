@@ -31,7 +31,9 @@ type GitPlugin struct{}
 func (GitPlugin) Name() string        { return "git" }
 func (GitPlugin) Description() string { return "git version control backed by the virtual FS" }
 func (GitPlugin) Usage() string {
-	return "git <clone|init|add|rm|status|commit|log|diff|branch|checkout|reset|show|stash> [args...]"
+	return "git <clone|init|add|rm|status|commit|log|diff|branch|checkout|reset|show|stash|" +
+		"merge|fetch|pull|push|remote|tag|blame|ls-files|ls-tree|shortlog|describe|" +
+		"switch|restore|cherry-pick|revert|format-patch|apply|cat-file|hash-object|ls-remote|config> [args...]"
 }
 
 var _ plugins.PluginInfo = GitPlugin{}
@@ -96,8 +98,47 @@ func (GitPlugin) Run(ctx context.Context, args []string) error {
 	case "show":
 		return cmdGitShow(hc.Stdout, fs, cwd, rest)
 	case "stash":
-		fmt.Fprintln(hc.Stdout, "stash: not yet implemented")
-		return nil
+		return cmdGitStash(hc.Stdout, hc.Stderr, fs, cwd, rest)
+	case "merge":
+		return cmdGitMerge(hc.Stdout, hc.Stderr, fs, cwd, rest)
+	case "fetch":
+		return cmdGitFetch(hc.Stdout, hc.Stderr, fs, cwd, rest)
+	case "pull":
+		return cmdGitPull(hc.Stdout, hc.Stderr, fs, cwd, rest)
+	case "push":
+		return cmdGitPush(hc.Stdout, hc.Stderr, fs, cwd, rest)
+	case "remote":
+		return cmdGitRemote(hc.Stdout, hc.Stderr, fs, cwd, rest)
+	case "tag":
+		return cmdGitTag(hc.Stdout, hc.Stderr, fs, cwd, rest)
+	case "blame":
+		return cmdGitBlame(hc.Stdout, hc.Stderr, fs, cwd, rest)
+	case "ls-files":
+		return cmdGitLsFiles(hc.Stdout, hc.Stderr, fs, cwd, rest)
+	case "ls-tree":
+		return cmdGitLsTree(hc.Stdout, hc.Stderr, fs, cwd, rest)
+	case "shortlog":
+		return cmdGitShortlog(hc.Stdout, hc.Stderr, fs, cwd, rest)
+	case "describe":
+		return cmdGitDescribe(hc.Stdout, hc.Stderr, fs, cwd, rest)
+	case "switch":
+		return cmdGitSwitch(hc.Stdout, hc.Stderr, fs, cwd, rest)
+	case "restore":
+		return cmdGitRestore(hc.Stdout, hc.Stderr, fs, cwd, rest)
+	case "cherry-pick":
+		return cmdGitCherryPick(hc.Stdout, hc.Stderr, fs, cwd, rest)
+	case "revert":
+		return cmdGitRevert(hc.Stdout, hc.Stderr, fs, cwd, rest)
+	case "format-patch":
+		return cmdGitFormatPatch(hc.Stdout, hc.Stderr, fs, cwd, rest)
+	case "apply":
+		return cmdGitApply(hc.Stdout, hc.Stderr, fs, cwd, rest)
+	case "cat-file":
+		return cmdGitCatFile(hc.Stdout, hc.Stderr, fs, cwd, rest)
+	case "hash-object":
+		return cmdGitHashObject(hc.Stdout, hc.Stderr, fs, cwd, rest)
+	case "ls-remote":
+		return cmdGitLsRemote(hc.Stdout, hc.Stderr, fs, cwd, rest)
 	case "config":
 		return cmdGitConfig(hc.Stdout, hc.Stderr, fs, cwd, rest)
 	default:
