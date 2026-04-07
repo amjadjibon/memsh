@@ -23,6 +23,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/amjadjibon/memsh/shell"
+	"github.com/amjadjibon/memsh/shell/plugins/native"
 	"github.com/amjadjibon/memsh/web"
 )
 
@@ -40,6 +41,7 @@ type runRequest struct {
 // runResponse is the JSON body returned by POST /run.
 type runResponse struct {
 	Output string `json:"output"`
+	Pager  bool   `json:"pager,omitempty"`
 	Cwd    string `json:"cwd"`
 	Error  string `json:"error,omitempty"`
 }
@@ -253,6 +255,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		}
 
 		ctx := r.Context()
+		ctx = native.WithPagerMode(ctx)
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, timeout)
 		defer cancel()
@@ -289,7 +292,13 @@ func runServe(cmd *cobra.Command, _ []string) error {
 			store.updateCwd(sessionID, cwd)
 		}
 
-		resp := runResponse{Output: out.String(), Cwd: cwd}
+		output := out.String()
+		pager := false
+		if strings.HasPrefix(output, native.PagerSentinel) {
+			output = output[len(native.PagerSentinel):]
+			pager = true
+		}
+		resp := runResponse{Output: output, Pager: pager, Cwd: cwd}
 		if runErr != nil && !errors.Is(runErr, shell.ErrExit) {
 			if errors.Is(runErr, context.DeadlineExceeded) {
 				resp.Error = "timeout: execution exceeded " + timeout.String()

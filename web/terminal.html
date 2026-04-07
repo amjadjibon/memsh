@@ -254,6 +254,91 @@
     border-radius: 50%; animation: spin .7s linear infinite;
     vertical-align: middle; margin-right: 4px;
   }
+
+  /* ── pager overlay ── */
+  #pager {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: var(--bg);
+    z-index: 200;
+    flex-direction: column;
+  }
+  #pager.active { display: flex; }
+
+  #pager-viewport {
+    flex: 1;
+    overflow: hidden;
+    position: relative;
+    padding: 8px 0;
+  }
+
+  #pager-lines {
+    position: absolute;
+    top: 8px; left: 0; right: 0;
+    font-family: var(--mono);
+    font-size: 13px;
+    line-height: 1.5;
+  }
+
+  .pager-line {
+    display: flex;
+    white-space: pre;
+    padding: 0 22px;
+    min-height: 1.5em;
+  }
+  .pager-line:hover { background: var(--surface2); }
+
+  .pager-ln {
+    color: var(--dim);
+    min-width: 4ch;
+    margin-right: 12px;
+    text-align: right;
+    flex-shrink: 0;
+    user-select: none;
+  }
+
+  .pager-text {
+    color: var(--text);
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* search highlight */
+  .pager-match { background: #e3b34155; color: var(--yellow); border-radius: 2px; }
+  .pager-match.current { background: var(--yellow); color: var(--bg); }
+
+  #pager-status {
+    flex-shrink: 0;
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    padding: 7px 22px;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--dim);
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    min-height: 32px;
+  }
+
+  #pager-pos   { color: var(--text); font-weight: bold; }
+  #pager-keys  { flex: 1; }
+  #pager-search-box {
+    display: none;
+    align-items: center;
+    gap: 6px;
+    flex: 1;
+  }
+  #pager-search-box.active { display: flex; }
+  #pager-search-input {
+    background: var(--bg); border: 1px solid var(--green); border-radius: 4px;
+    padding: 2px 8px; color: var(--text); font-family: var(--mono); font-size: 12px;
+    outline: none; width: 220px;
+  }
+  #pager-search-label { color: var(--green); }
+  #pager-search-count { color: var(--dim); font-size: 11px; }
 </style>
 </head>
 <body>
@@ -314,10 +399,32 @@
 
 </div>
 
+<!-- pager overlay (outside #app so it covers everything) -->
+<div id="pager" role="dialog" aria-modal="true" aria-label="pager">
+  <div id="pager-viewport">
+    <div id="pager-lines"></div>
+  </div>
+  <div id="pager-status">
+    <span id="pager-pos"></span>
+    <span id="pager-keys">j/k scroll &nbsp;·&nbsp; Space/b page &nbsp;·&nbsp; g/G top/bottom &nbsp;·&nbsp; / search &nbsp;·&nbsp; n/N next/prev &nbsp;·&nbsp; q quit</span>
+    <div id="pager-search-box">
+      <span id="pager-search-label">/</span>
+      <input id="pager-search-input" type="text" autocomplete="off" spellcheck="false" placeholder="search…">
+      <span id="pager-search-count"></span>
+    </div>
+  </div>
+</div>
+
 <script>
 // ── elements ──────────────────────────────────────────────────────────────────
-const app       = document.getElementById('app');
-const mainEl    = document.getElementById('main');
+const app         = document.getElementById('app');
+const mainEl      = document.getElementById('main');
+const pagerEl     = document.getElementById('pager');
+const pagerLinesEl= document.getElementById('pager-lines');
+const pagerPosEl  = document.getElementById('pager-pos');
+const pagerSearchBox   = document.getElementById('pager-search-box');
+const pagerSearchInput = document.getElementById('pager-search-input');
+const pagerSearchCount = document.getElementById('pager-search-count');
 const cmdEl     = document.getElementById('cmd');
 const runBtn    = document.getElementById('run-btn');
 const promptEl  = document.getElementById('prompt');
@@ -518,6 +625,218 @@ function updatePrompt(cwd) {
   promptEl.innerHTML = `<span class="path">${esc(cwd)}</span> $`;
 }
 
+// ── pager ─────────────────────────────────────────────────────────────────────
+let pagerLines   = [];   // raw line strings
+let pagerTop     = 0;    // index of topmost visible line
+let pagerPageH   = 24;   // visible lines (recalculated on open/resize)
+let pagerNumbers = true; // show line numbers
+let pagerSearch  = '';   // current search pattern
+let pagerMatches = [];   // array of line indices that match
+let pagerMatchIdx = -1;  // current match index (for n/N)
+let pagerSearchMode = false;
+
+function pagerLineHeight() {
+  // compute actual rendered line height from a sample element
+  const tmp = document.createElement('div');
+  tmp.className = 'pager-line';
+  tmp.style.visibility = 'hidden';
+  tmp.textContent = 'x';
+  pagerLinesEl.appendChild(tmp);
+  const h = tmp.getBoundingClientRect().height || 19.5;
+  pagerLinesEl.removeChild(tmp);
+  return h;
+}
+
+function pagerRecalcHeight() {
+  const vpH = pagerEl.querySelector('#pager-viewport').clientHeight - 16; // 8px top+bottom padding
+  const lh = pagerLineHeight();
+  pagerPageH = Math.max(1, Math.floor(vpH / lh));
+}
+
+function openPager(content, startLine, showNumbers) {
+  pagerLines = content.split('\n');
+  // trim trailing empty line that split produces for a trailing newline
+  if (pagerLines.length && pagerLines[pagerLines.length - 1] === '') pagerLines.pop();
+  pagerNumbers = showNumbers !== false;
+  pagerSearch  = '';
+  pagerMatches = [];
+  pagerMatchIdx = -1;
+  pagerSearchMode = false;
+  pagerSearchBox.classList.remove('active');
+  pagerSearchInput.value = '';
+  pagerSearchCount.textContent = '';
+
+  pagerEl.classList.add('active');
+  pagerRecalcHeight();
+  pagerTop = Math.min(startLine || 0, Math.max(0, pagerLines.length - pagerPageH));
+  renderPager();
+  document.addEventListener('keydown', pagerKeydown, true);
+}
+
+function closePager() {
+  pagerEl.classList.remove('active');
+  document.removeEventListener('keydown', pagerKeydown, true);
+  pagerSearchMode = false;
+  cmdEl.focus();
+}
+
+function clampTop(v) {
+  return Math.max(0, Math.min(v, Math.max(0, pagerLines.length - pagerPageH)));
+}
+
+function renderPager() {
+  const visible = pagerLines.slice(pagerTop, pagerTop + pagerPageH);
+  const lnWidth = String(pagerLines.length).length;
+  const frag = document.createDocumentFragment();
+
+  visible.forEach((raw, i) => {
+    const absIdx = pagerTop + i;
+    const row = document.createElement('div');
+    row.className = 'pager-line';
+
+    if (pagerNumbers) {
+      const ln = document.createElement('span');
+      ln.className = 'pager-ln';
+      ln.textContent = String(absIdx + 1).padStart(lnWidth, ' ');
+      row.appendChild(ln);
+    }
+
+    const txt = document.createElement('span');
+    txt.className = 'pager-text';
+
+    if (pagerSearch) {
+      txt.innerHTML = highlightLine(raw, pagerSearch, pagerMatches.indexOf(absIdx) >= 0 && absIdx === (pagerMatches[pagerMatchIdx] ?? -1));
+    } else {
+      txt.textContent = raw;
+    }
+    row.appendChild(txt);
+    frag.appendChild(row);
+  });
+
+  pagerLinesEl.innerHTML = '';
+  pagerLinesEl.appendChild(frag);
+
+  const end = Math.min(pagerTop + pagerPageH, pagerLines.length);
+  const pct = pagerLines.length ? Math.round(end / pagerLines.length * 100) : 100;
+  const matchInfo = pagerSearch && pagerMatches.length
+    ? ` · match ${pagerMatchIdx + 1}/${pagerMatches.length}`
+    : '';
+  pagerPosEl.textContent = `lines ${pagerTop + 1}–${end} / ${pagerLines.length} (${pct}%)${matchInfo}`;
+}
+
+function highlightLine(text, pattern, isCurrent) {
+  if (!pattern) return esc(text);
+  try {
+    const re = new RegExp(pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+    return esc(text).replace(re.source ? new RegExp(esc(pattern).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi') : re,
+      m => `<span class="pager-match${isCurrent ? ' current' : ''}">${m}</span>`
+    );
+  } catch { return esc(text); }
+}
+
+function pagerRunSearch(pattern) {
+  pagerSearch  = pattern;
+  pagerMatches = [];
+  pagerMatchIdx = -1;
+  if (!pattern) { renderPager(); return; }
+  try {
+    const re = new RegExp(pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+    pagerLines.forEach((l, i) => { if (re.test(l)) pagerMatches.push(i); });
+  } catch { /* bad pattern */ }
+  if (pagerMatches.length) {
+    // jump to first match at or after current top
+    pagerMatchIdx = pagerMatches.findIndex(i => i >= pagerTop);
+    if (pagerMatchIdx < 0) pagerMatchIdx = 0;
+    pagerTop = clampTop(pagerMatches[pagerMatchIdx]);
+  }
+  pagerSearchCount.textContent = pagerMatches.length
+    ? `${pagerMatchIdx + 1}/${pagerMatches.length}`
+    : 'no matches';
+  renderPager();
+}
+
+function pagerNextMatch(dir) {
+  if (!pagerMatches.length) return;
+  pagerMatchIdx = (pagerMatchIdx + dir + pagerMatches.length) % pagerMatches.length;
+  pagerTop = clampTop(pagerMatches[pagerMatchIdx]);
+  pagerSearchCount.textContent = `${pagerMatchIdx + 1}/${pagerMatches.length}`;
+  renderPager();
+}
+
+function pagerKeydown(e) {
+  if (pagerSearchMode) {
+    if (e.key === 'Enter') {
+      e.preventDefault(); e.stopPropagation();
+      pagerSearchMode = false;
+      pagerSearchBox.classList.remove('active');
+      pagerSearchInput.blur();
+      pagerRunSearch(pagerSearchInput.value.trim());
+    } else if (e.key === 'Escape') {
+      e.preventDefault(); e.stopPropagation();
+      pagerSearchMode = false;
+      pagerSearchBox.classList.remove('active');
+      pagerSearchInput.blur();
+      pagerSearch = '';
+      pagerMatches = [];
+      pagerMatchIdx = -1;
+      renderPager();
+    }
+    return; // let input handle other keys
+  }
+
+  switch (e.key) {
+  case 'j': case 'ArrowDown':
+    e.preventDefault(); e.stopPropagation();
+    pagerTop = clampTop(pagerTop + 1); renderPager(); break;
+  case 'k': case 'ArrowUp':
+    e.preventDefault(); e.stopPropagation();
+    pagerTop = clampTop(pagerTop - 1); renderPager(); break;
+  case 'd':
+    if (!e.ctrlKey) break;
+    /* fall through */
+  case ' ': case 'PageDown': case 'f':
+    e.preventDefault(); e.stopPropagation();
+    pagerTop = clampTop(pagerTop + pagerPageH); renderPager(); break;
+  case 'u':
+    if (!e.ctrlKey) break;
+    /* fall through */
+  case 'b': case 'PageUp':
+    e.preventDefault(); e.stopPropagation();
+    pagerTop = clampTop(pagerTop - pagerPageH); renderPager(); break;
+  case 'g': case 'Home':
+    e.preventDefault(); e.stopPropagation();
+    pagerTop = 0; renderPager(); break;
+  case 'G': case 'End':
+    e.preventDefault(); e.stopPropagation();
+    pagerTop = clampTop(pagerLines.length); renderPager(); break;
+  case '/':
+    e.preventDefault(); e.stopPropagation();
+    pagerSearchMode = true;
+    pagerSearchBox.classList.add('active');
+    pagerSearchInput.value = '';
+    pagerSearchCount.textContent = '';
+    pagerSearchInput.focus();
+    break;
+  case 'n':
+    e.preventDefault(); e.stopPropagation();
+    pagerNextMatch(1); break;
+  case 'N':
+    e.preventDefault(); e.stopPropagation();
+    pagerNextMatch(-1); break;
+  case 'q': case 'Q': case 'Escape':
+    e.preventDefault(); e.stopPropagation();
+    closePager(); break;
+  }
+}
+
+window.addEventListener('resize', () => {
+  if (pagerEl.classList.contains('active')) {
+    pagerRecalcHeight();
+    pagerTop = clampTop(pagerTop);
+    renderPager();
+  }
+});
+
 // ── run ───────────────────────────────────────────────────────────────────────
 async function run() {
   const script = cmdEl.value;
@@ -555,7 +874,22 @@ async function run() {
       body: JSON.stringify({ script }),
     });
     const d = await r.json();
-    if (d.output) appendOut(d.output);
+    if (d.pager && d.output) {
+      // parse sentinel metadata line: first line is JSON, rest is content
+      const nl = d.output.indexOf('\n');
+      let startLine = 0, showNumbers = true, content = d.output;
+      if (nl >= 0) {
+        try {
+          const meta = JSON.parse(d.output.slice(0, nl));
+          startLine   = meta.start   ?? 0;
+          showNumbers = meta.numbers ?? true;
+        } catch { /* ignore bad metadata */ }
+        content = d.output.slice(nl + 1);
+      }
+      openPager(content, startLine, showNumbers);
+    } else {
+      if (d.output) appendOut(d.output);
+    }
     if (d.error)  appendErr(d.error);
     if (d.cwd)    updatePrompt(d.cwd);
   } catch (e) {

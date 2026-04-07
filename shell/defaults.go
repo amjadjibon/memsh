@@ -49,6 +49,8 @@ func defaultNativePlugins() []plugins.Plugin {
 		native.Zip(),
 		native.Unzip(),
 		nativegit.GitPlugin{},
+		native.Less(),
+		native.More(),
 	}
 }
 
