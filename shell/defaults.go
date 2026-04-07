@@ -3,6 +3,7 @@ package shell
 import (
 	"github.com/amjadjibon/memsh/shell/plugins"
 	"github.com/amjadjibon/memsh/shell/plugins/native"
+	nativegit "github.com/amjadjibon/memsh/shell/plugins/native/git"
 )
 
 // defaultPlugins holds WASM plugins bundled at compile time.
@@ -26,7 +27,7 @@ func defaultNativePlugins() []plugins.Plugin {
 		native.GojaPlugin{},
 		native.JqPlugin{},
 		native.YqPlugin{},
-		native.GitPlugin{},
+		nativegit.GitPlugin{},
 	}
 }
 
