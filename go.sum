@@ -9,6 +9,8 @@ github.com/Microsoft/go-winio v0.6.2 h1:F2VQgta7ecxGYO8k3ZZz3RS8fVIXVxONVUPlNERo
 github.com/Microsoft/go-winio v0.6.2/go.mod h1:yd8OoFMLzJbo9gZq8j5qaps8bJ9aShtEA8Ipt1oGCvU=
 github.com/ProtonMail/go-crypto v1.1.6 h1:ZcV+Ropw6Qn0AX9brlQLAUXfqLBc7Bl+f/DmNxpLfdw=
 github.com/ProtonMail/go-crypto v1.1.6/go.mod h1:rA3QumHc/FZ8pAHreoekgiAbzpNsfQAosU5td4SnOrE=
+github.com/amjadjibon/calc-go v0.1.0 h1:wQQAEeAoeC5h8ilYiSvLd4+p+BcuAgosHGJi42eTm6g=
+github.com/amjadjibon/calc-go v0.1.0/go.mod h1:EbeK7COigMVCfUFS3z784skkajb5TJrOfDFVo6UfU9U=
 github.com/amjadjibon/sh/v3 v3.0.0-20260406134937-18d6e68b8bd9 h1:024CPXYooU6LemQddkbfc4vVfOIqll7bLf/fAI8xhrk=
 github.com/amjadjibon/sh/v3 v3.0.0-20260406134937-18d6e68b8bd9/go.mod h1:lXJ8SexMvEVcHCoDvAGLZgFJ9Wsm2sulmoNEXGhYZD0=
 github.com/anmitsu/go-shlex v0.0.0-20200514113438-38f4b401e2be h1:9AeTilPcZAjCFIImctFaOjnTIavg87rW78vTPkQqLI8=

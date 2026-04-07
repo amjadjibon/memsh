@@ -4,6 +4,7 @@ go 1.26
 
 require (
 	github.com/BurntSushi/toml v1.6.0
+	github.com/amjadjibon/calc-go v0.1.0
 	github.com/benhoyt/goawk v1.31.0
 	github.com/chzyer/readline v1.5.1
 	github.com/dop251/goja v0.0.0-20260311135729-065cd970411c
