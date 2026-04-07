@@ -200,6 +200,8 @@ func (s *Shell) execHandler(next interp.ExecHandlerFunc) interp.ExecHandlerFunc 
 			return s.builtinLn(ctx, args)
 		case "xargs":
 			return s.builtinXargs(ctx, args)
+		case "timeout":
+			return s.builtinTimeout(ctx, next, args)
 		case "source", ".":
 			return s.builtinSource(ctx, args)
 		case "du":
@@ -2974,4 +2976,89 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// builtinTimeout runs a command with a context deadline.
+//
+//	timeout DURATION CMD [ARGS...]
+//	timeout -s SIGNAL DURATION CMD [ARGS...]   (signal ignored; always SIGTERM behaviour)
+//	timeout -k KILL_AFTER DURATION CMD [ARGS...]
+//
+// Exit codes:
+//
+//	124  timed out
+//	125  timeout itself failed (bad duration / missing command)
+//	126  command found but not executable
+//	127  command not found
+//	otherwise: command's own exit code
+func (s *Shell) builtinTimeout(ctx context.Context, next interp.ExecHandlerFunc, args []string) error {
+	hc := interp.HandlerCtx(ctx)
+
+	// strip recognised flags; we honour -k (ignored after kill) and -s (ignored signal)
+	i := 1
+	for i < len(args) {
+		switch args[i] {
+		case "--":
+			i++
+			goto doneFlags
+		case "-s", "--signal":
+			i += 2 // skip signal name
+		case "-k", "--kill-after":
+			i += 2 // skip kill-after duration
+		case "--preserve-status", "--foreground":
+			i++
+		default:
+			if strings.HasPrefix(args[i], "-") {
+				// unknown flag
+				fmt.Fprintf(hc.Stderr, "timeout: unknown flag %q\n", args[i])
+				return interp.ExitStatus(125)
+			}
+			goto doneFlags
+		}
+	}
+doneFlags:
+
+	if i >= len(args) {
+		fmt.Fprintln(hc.Stderr, "timeout: missing operand")
+		return interp.ExitStatus(125)
+	}
+
+	dur, err := parseDuration(args[i])
+	if err != nil {
+		fmt.Fprintf(hc.Stderr, "timeout: invalid time interval %q\n", args[i])
+		return interp.ExitStatus(125)
+	}
+	i++
+
+	if i >= len(args) {
+		fmt.Fprintln(hc.Stderr, "timeout: missing command")
+		return interp.ExitStatus(125)
+	}
+	cmdArgs := args[i:]
+
+	// a zero or negative duration means no timeout
+	if dur <= 0 {
+		return s.execHandler(next)(ctx, cmdArgs)
+	}
+
+	tctx, cancel := context.WithTimeout(ctx, dur)
+	defer cancel()
+
+	err = s.execHandler(next)(tctx, cmdArgs)
+	if err != nil {
+		if errors.Is(tctx.Err(), context.DeadlineExceeded) {
+			return interp.ExitStatus(124)
+		}
+	}
+	return err
+}
+
+// parseDuration converts a timeout operand to time.Duration.
+// Accepts Go duration strings (5s, 1m30s) and bare numbers (seconds).
+func parseDuration(s string) (time.Duration, error) {
+	// bare number → seconds (integer or float)
+	if f, err := strconv.ParseFloat(s, 64); err == nil {
+		return time.Duration(f * float64(time.Second)), nil
+	}
+	return time.ParseDuration(s)
 }
