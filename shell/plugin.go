@@ -197,6 +197,11 @@ func (s *Shell) runWASIPlugin(ctx context.Context, compiled wazero.CompiledModul
 		WithEnv("PYTHONDONTWRITEBYTECODE", "1").
 		WithName("")
 
+	// Ruby-specific: suppress optional library warnings
+	if name == "ruby" {
+		modConfig = modConfig.WithEnv("RUBYOPT", "-W0")
+	}
+
 	_, runErr := s.rt.InstantiateModule(ctx, compiled, modConfig)
 	if runErr != nil {
 		var exitErr *sys.ExitError
