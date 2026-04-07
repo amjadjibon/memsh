@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -3175,6 +3176,29 @@ func (s *Shell) builtinSource(ctx context.Context, args []string) error {
 	}
 
 	return s.Run(ctx, string(data))
+}
+
+// sourceURL fetches a script from a URL and returns its contents.
+// The response body is capped at 10 MiB to prevent memory exhaustion.
+func sourceURL(ctx context.Context, url string) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", "memsh/1.0")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("HTTP %s", resp.Status)
+	}
+
+	const maxSize = 10 << 20 // 10 MiB
+	return io.ReadAll(io.LimitReader(resp.Body, maxSize))
 }
 
 func (s *Shell) builtinDu(ctx context.Context, args []string) error {
