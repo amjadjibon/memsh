@@ -53,6 +53,7 @@ func defaultNativePlugins() []plugins.Plugin {
 		native.More(),
 		native.SSHPlugin{},
 		native.CrontabPlugin{},
+		native.SQLitePlugin{},
 	}
 }
 
