@@ -28,6 +28,17 @@ func defaultNativePlugins() []plugins.Plugin {
 		native.JqPlugin{},
 		native.YqPlugin{},
 		native.CurlPlugin{},
+		native.MD5Sum(),
+		native.SHA1Sum(),
+		native.SHA224Sum(),
+		native.SHA256Sum(),
+		native.SHA384Sum(),
+		native.SHA512Sum(),
+		native.TarPlugin{},
+		native.Gzip(),
+		native.Gunzip(),
+		native.Zip(),
+		native.Unzip(),
 		nativegit.GitPlugin{},
 	}
 }
