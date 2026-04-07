@@ -75,6 +75,7 @@ type sessionEntry struct {
 	cwd       string
 	createdAt time.Time
 	lastUse   time.Time
+	rcLoaded  bool // true after /.memshrc has been sourced for this session
 }
 
 // sessionStore manages persistent shell sessions keyed by an arbitrary ID.
@@ -120,13 +121,33 @@ func (st *sessionStore) get(id string) (*sessionEntry, bool) {
 	return e, true
 }
 
-// updateCwd records the cwd after a request finishes so the next request in
-// the same session picks it up.
-func (st *sessionStore) updateCwd(id, cwd string) {
+// updateSession records the cwd after a request finishes so the next request
+// in the same session picks it up. Alias state is persisted in the virtual FS
+// via /.memsh_session_aliases, so it does not need a separate field here.
+func (st *sessionStore) updateSession(id, cwd string, rcLoaded bool) {
 	st.mu.Lock()
 	defer st.mu.Unlock()
 	if e, ok := st.entries[id]; ok {
 		e.cwd = cwd
+		if rcLoaded {
+			e.rcLoaded = true
+		}
+	}
+}
+
+// aliasesFile is the virtual-FS path used to persist aliases across requests.
+const aliasesFile = "/.memsh_session_aliases"
+
+// saveAliases writes the current alias table to aliasesFile in the virtual FS
+// so the next shell can restore it via source.
+func saveAliases(ctx context.Context, sh *shell.Shell) {
+	_ = sh.Run(ctx, "alias > "+aliasesFile)
+}
+
+// restoreAliases sources aliasesFile if it exists.
+func restoreAliases(ctx context.Context, sh *shell.Shell, fs afero.Fs) {
+	if ok, _ := afero.Exists(fs, aliasesFile); ok {
+		_ = sh.Run(ctx, "source "+aliasesFile)
 	}
 }
 
@@ -275,8 +296,10 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		opts[len(baseOpts)] = shell.WithStdIO(strings.NewReader(""), &out, &out)
 
 		sessionID := r.Header.Get("X-Session-ID")
+		var entry *sessionEntry
 		if sessionID != "" {
-			entry, ok := store.get(sessionID)
+			var ok bool
+			entry, ok = store.get(sessionID)
 			if !ok {
 				writeJSON(w, http.StatusTooManyRequests, runResponse{
 					Error: "maximum number of sessions reached",
@@ -294,11 +317,22 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		}
 		defer sh.Close()
 
+		// Restore aliases and .memshrc on first/subsequent requests.
+		rcLoaded := false
+		if entry != nil {
+			restoreAliases(ctx, sh, entry.fs)
+			if !entry.rcLoaded {
+				_ = sh.LoadMemshrc(ctx)
+				rcLoaded = true
+			}
+		}
+
 		runErr := sh.Run(ctx, req.Script)
 		cwd := sh.Cwd()
 
 		if sessionID != "" {
-			store.updateCwd(sessionID, cwd)
+			saveAliases(ctx, sh)
+			store.updateSession(sessionID, cwd, entry.rcLoaded || rcLoaded)
 		}
 
 		output := out.String()
@@ -482,8 +516,15 @@ func handleSSHSession(s gliderssh.Session, store *sessionStore, baseOpts []shell
 		ctx, cancel := context.WithTimeout(s.Context(), timeout)
 		defer cancel()
 
+		restoreAliases(ctx, sh, entry.fs)
+		rcLoaded := false
+		if !entry.rcLoaded {
+			_ = sh.LoadMemshrc(ctx)
+			rcLoaded = true
+		}
 		runErr := sh.Run(ctx, script)
-		store.updateCwd(sessionID, sh.Cwd())
+		saveAliases(ctx, sh)
+		store.updateSession(sessionID, sh.Cwd(), entry.rcLoaded || rcLoaded)
 
 		if runErr != nil && !errors.Is(runErr, shell.ErrExit) {
 			_ = s.Exit(1)
@@ -494,7 +535,24 @@ func handleSSHSession(s gliderssh.Session, store *sessionStore, baseOpts []shell
 	}
 
 	// ── interactive REPL ─────────────────────────────────────────────────
+	// Load .memshrc once at session start for interactive mode.
 	cwd := entry.cwd
+	if !entry.rcLoaded {
+		initOpts := make([]shell.Option, len(baseOpts), len(baseOpts)+3)
+		copy(initOpts, baseOpts)
+		initOpts = append(initOpts,
+			shell.WithFS(entry.fs),
+			shell.WithCwd(cwd),
+			shell.WithStdIO(strings.NewReader(""), io.Discard, io.Discard),
+		)
+		if rcSh, rcErr := shell.New(initOpts...); rcErr == nil {
+			_ = rcSh.LoadMemshrc(s.Context())
+			saveAliases(s.Context(), rcSh)
+			rcSh.Close()
+		}
+		store.updateSession(sessionID, cwd, true)
+	}
+
 	for {
 		// Print prompt — use CR+LF so the cursor returns to column 0.
 		fmt.Fprintf(s, "memsh:%s$ ", cwd)
@@ -529,12 +587,14 @@ func handleSSHSession(s gliderssh.Session, store *sessionStore, baseOpts []shell
 		}
 
 		ctx, cancel := context.WithTimeout(s.Context(), timeout)
+		restoreAliases(ctx, sh, entry.fs)
 		runErr := sh.Run(ctx, line)
+		saveAliases(ctx, sh)
 		cancel()
 		newCwd := sh.Cwd()
 		sh.Close()
 
-		store.updateCwd(sessionID, newCwd)
+		store.updateSession(sessionID, newCwd, true)
 		cwd = newCwd
 
 		// Translate bare LF → CR+LF for the remote terminal.

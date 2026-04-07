@@ -41,6 +41,7 @@ type Shell struct {
 	rt       wazero.Runtime
 	compiled map[string]wazero.CompiledModule
 
+	aliases     map[string]string
 	sourceDepth int
 	realCwd     string
 }
@@ -88,6 +89,7 @@ func New(opts ...Option) (*Shell, error) {
 		builtins:    make(map[string]BuiltinFunc),
 		fds:         make(map[uint32]afero.File),
 		compiled:    make(map[string]wazero.CompiledModule),
+		aliases:     make(map[string]string),
 		wasmEnabled: true,
 		inheritEnv:  true,
 		realCwd:     "/",
@@ -122,6 +124,7 @@ func New(opts ...Option) (*Shell, error) {
 		interp.ReadDirHandler2(s.readDirHandler),
 		interp.StatHandler(s.statHandler),
 		interp.ExecHandlers(s.execHandler),
+		interp.Interactive(true), // enable alias expansion
 	)
 	if err != nil {
 		return nil, err
@@ -155,6 +158,19 @@ func New(opts ...Option) (*Shell, error) {
 		}
 	}
 
+	// Pre-seed aliases from WithAliases option by running alias commands.
+	if len(s.aliases) > 0 {
+		var initScript strings.Builder
+		for name, value := range s.aliases {
+			// Use single-quote wrapping; escape any single quotes in value.
+			escaped := strings.ReplaceAll(value, "'", `'\''`)
+			fmt.Fprintf(&initScript, "alias %s='%s'\n", name, escaped)
+		}
+		if initErr := s.Run(context.Background(), initScript.String()); initErr != nil {
+			return nil, fmt.Errorf("WithAliases init: %w", initErr)
+		}
+	}
+
 	return s, nil
 }
 
@@ -181,6 +197,16 @@ func (s *Shell) ListDir(path string) ([]string, error) {
 	}
 	defer f.Close()
 	return f.Readdirnames(-1)
+}
+
+// LoadMemshrc sources /.memshrc from the virtual filesystem if it exists.
+// Errors are non-fatal — a missing file is silently ignored.
+func (s *Shell) LoadMemshrc(ctx context.Context) error {
+	data, err := afero.ReadFile(s.fs, "/.memshrc")
+	if err != nil {
+		return nil
+	}
+	return s.Run(ctx, string(data))
 }
 
 func (s *Shell) RegisteredPlugins() []string {

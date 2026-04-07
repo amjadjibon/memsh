@@ -111,6 +111,13 @@ func WithInheritEnv(inherit bool) Option {
 	}
 }
 
+// WithAliases pre-seeds the alias table (e.g. loaded from a config file).
+func WithAliases(aliases map[string]string) Option {
+	return func(s *Shell) {
+		maps.Copy(s.aliases, aliases)
+	}
+}
+
 // WithDisabledPlugins removes the named plugins from the shell.
 // Works for both native (builtin) and WASM plugins.
 // Applied after defaults, so it can suppress defaultNativePlugins entries.

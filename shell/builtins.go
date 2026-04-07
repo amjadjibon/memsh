@@ -194,7 +194,7 @@ func (s *Shell) execHandler(next interp.ExecHandlerFunc) interp.ExecHandlerFunc 
 			return s.builtinYes(ctx, args)
 		case "env", "printenv":
 			return s.builtinEnv(ctx, args)
-		case "which", "type":
+		case "which":
 			return s.builtinWhich(ctx, args)
 		case "ln":
 			return s.builtinLn(ctx, args)
@@ -3047,6 +3047,10 @@ func (s *Shell) builtinWhich(ctx context.Context, args []string) error {
 		return nil
 	}
 	for _, name := range args[1:] {
+		if v, ok := s.aliases[name]; ok {
+			fmt.Fprintf(hc.Stdout, "%s: aliased to %s\n", name, v)
+			continue
+		}
 		if _, ok := builtinHelp[name]; ok {
 			fmt.Fprintf(hc.Stdout, "%s: shell built-in command\n", name)
 			continue
@@ -3277,7 +3281,9 @@ var builtinHelp = map[string][2]string{
 	"seq":    {"print a sequence of numbers", "seq [first [increment]] last"},
 	"sleep":  {"delay for a specified time", "sleep <seconds>"},
 	"sort":   {"sort lines of text", "sort [-r] [-u] [-n] [file]"},
-	"source": {"execute commands from a file", "source <file>"},
+	"alias":   {"define or display aliases", "alias [name[=value] ...]"},
+	"unalias": {"remove alias definitions", "unalias [-a] name [name ...]"},
+	"source":  {"execute commands from a file", "source <file>"},
 	"stat":   {"show file status", "stat <file>..."},
 	"tail":   {"print last lines of a file", "tail [-n N] [-c N] [file]"},
 	"tee":    {"read stdin; write to stdout and files", "tee [-a] [file]..."},
