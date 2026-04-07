@@ -189,6 +189,10 @@ func (s *Shell) Cwd() string {
 	return s.cwd
 }
 
+func (s *Shell) FS() afero.Fs {
+	return s.fs
+}
+
 func (s *Shell) ListDir(path string) ([]string, error) {
 	abs := s.resolvePath(path)
 	f, err := s.fs.Open(abs)

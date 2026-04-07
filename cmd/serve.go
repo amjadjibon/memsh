@@ -151,6 +151,27 @@ func restoreAliases(ctx context.Context, sh *shell.Shell, fs afero.Fs) {
 	}
 }
 
+// replace creates or overwrites a session with the given filesystem and cwd.
+// Used by the snapshot import endpoint.
+func (st *sessionStore) replace(id string, fs afero.Fs, cwd string) {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	now := time.Now()
+	if e, ok := st.entries[id]; ok {
+		e.fs = fs
+		e.cwd = cwd
+		e.rcLoaded = false
+		e.lastUse = now
+		return
+	}
+	st.entries[id] = &sessionEntry{
+		fs:        fs,
+		cwd:       cwd,
+		createdAt: now,
+		lastUse:   now,
+	}
+}
+
 // delete removes and discards a session.
 func (st *sessionStore) delete(id string) {
 	st.mu.Lock()
@@ -361,6 +382,65 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	mux.HandleFunc("DELETE /session/{id}", func(w http.ResponseWriter, r *http.Request) {
 		store.delete(r.PathValue("id"))
 		w.WriteHeader(http.StatusNoContent)
+	})
+
+	// ── GET /session/{id}/snapshot ─────────────────────────────────────────
+	// Export the full virtual filesystem + cwd of a session as a JSON snapshot.
+	// The response is served as an attachment so browsers download it directly.
+	mux.HandleFunc("GET /session/{id}/snapshot", func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		entry, ok := store.get(id)
+		if !ok {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "session not found"})
+			return
+		}
+		snap, err := shell.TakeSnapshot(entry.fs, entry.cwd)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		data, err := shell.MarshalSnapshot(snap)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Disposition", `attachment; filename="memsh-snapshot.json"`)
+		_, _ = w.Write(data)
+	})
+
+	// ── POST /session/{id}/snapshot ────────────────────────────────────────
+	// Import a JSON snapshot into an existing or new session.
+	// The session's virtual filesystem and cwd are completely replaced.
+	// If the id is "new", a fresh session ID is generated and returned.
+	mux.HandleFunc("POST /session/{id}/snapshot", func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		r.Body = http.MaxBytesReader(w, r.Body, 64<<20) // 64 MB limit
+		data, err := io.ReadAll(r.Body)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "failed to read body"})
+			return
+		}
+		snap, err := shell.UnmarshalSnapshot(data)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		fs, cwd, err := shell.RestoreSnapshot(snap)
+		if err != nil {
+			writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": err.Error()})
+			return
+		}
+
+		// "new" means generate a fresh session ID.
+		if id == "new" {
+			b := make([]byte, 8)
+			_, _ = rand.Read(b)
+			id = fmt.Sprintf("%x", b)
+		}
+
+		store.replace(id, fs, cwd)
+		writeJSON(w, http.StatusOK, map[string]string{"session_id": id})
 	})
 
 	// ── GET /health ────────────────────────────────────────────────────────
