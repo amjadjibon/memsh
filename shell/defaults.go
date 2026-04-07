@@ -52,6 +52,7 @@ func defaultNativePlugins() []plugins.Plugin {
 		native.Less(),
 		native.More(),
 		native.SSHPlugin{},
+		native.CrontabPlugin{},
 	}
 }
 

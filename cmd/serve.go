@@ -29,6 +29,7 @@ import (
 	gossh "golang.org/x/crypto/ssh"
 
 	"github.com/amjadjibon/memsh/shell"
+	"github.com/amjadjibon/memsh/shell/cron"
 	"github.com/amjadjibon/memsh/shell/plugins/native"
 	"github.com/amjadjibon/memsh/web"
 )
@@ -81,7 +82,8 @@ type sessionEntry struct {
 	cwd       string
 	createdAt time.Time
 	lastUse   time.Time
-	rcLoaded  bool // true after /.memshrc has been sourced for this session
+	rcLoaded  bool       // true after /.memshrc has been sourced for this session
+	cronMu    sync.Mutex // serialises concurrent cron job writes to /.cron_log
 }
 
 // sessionStore manages persistent shell sessions keyed by an arbitrary ID.
@@ -223,6 +225,121 @@ func (st *sessionStore) reap() {
 			}
 		}
 		st.mu.Unlock()
+	}
+}
+
+// sessionSnap is a lightweight copy of a session's key fields for use by the
+// cron scheduler without holding the store lock during job execution.
+type sessionSnap struct {
+	id     string
+	fs     afero.Fs
+	cwd    string
+	cronMu *sync.Mutex
+}
+
+// snapshot returns a point-in-time copy of all active sessions.
+func (st *sessionStore) snapshot() []sessionSnap {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	result := make([]sessionSnap, 0, len(st.entries))
+	for id, e := range st.entries {
+		result = append(result, sessionSnap{
+			id:     id,
+			fs:     e.fs,
+			cwd:    e.cwd,
+			cronMu: &e.cronMu,
+		})
+	}
+	return result
+}
+
+// startCronScheduler fires cron jobs for every active session once per minute.
+// It aligns to the next minute boundary before starting the ticker so that
+// CronMatches is evaluated at a consistent wall-clock minute. ctx should be
+// cancelled when the server shuts down.
+func startCronScheduler(ctx context.Context, store *sessionStore, baseOpts []shell.Option, timeout time.Duration) {
+	// Align to the next minute boundary.
+	now := time.Now()
+	next := now.Truncate(time.Minute).Add(time.Minute)
+	select {
+	case <-ctx.Done():
+		return
+	case <-time.After(time.Until(next)):
+	}
+
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case t := <-ticker.C:
+			for _, ss := range store.snapshot() {
+				go runSessionCronJobs(ctx, t, ss, baseOpts, timeout)
+			}
+		}
+	}
+}
+
+// runSessionCronJobs reads /.crontab from ss.fs, parses it, and runs any jobs
+// whose cron expression matches the given time t.
+func runSessionCronJobs(ctx context.Context, t time.Time, ss sessionSnap, baseOpts []shell.Option, timeout time.Duration) {
+	data, err := afero.ReadFile(ss.fs, cron.CrontabFile)
+	if err != nil {
+		// No crontab installed for this session — nothing to do.
+		return
+	}
+	jobs, err := cron.ParseCrontab(string(data))
+	if err != nil {
+		log.Printf("cron: session %s: parse error: %v", ss.id, err)
+		return
+	}
+	for _, job := range jobs {
+		if cron.CronMatches(job.Expr, t) {
+			runCronJob(ctx, t, job.Command, ss, baseOpts, timeout)
+		}
+	}
+}
+
+// runCronJob runs a single cron job command inside the session's virtual FS and
+// appends a timestamped log entry (including output) to /.cron_log.
+func runCronJob(ctx context.Context, t time.Time, command string, ss sessionSnap, baseOpts []shell.Option, timeout time.Duration) {
+	var out strings.Builder
+
+	opts := make([]shell.Option, len(baseOpts)+3)
+	copy(opts, baseOpts)
+	opts[len(baseOpts)] = shell.WithFS(ss.fs)
+	opts[len(baseOpts)+1] = shell.WithCwd(ss.cwd)
+	opts[len(baseOpts)+2] = shell.WithStdIO(strings.NewReader(""), &out, &out)
+
+	sh, err := shell.New(opts...)
+	if err != nil {
+		log.Printf("cron: session %s: shell init: %v", ss.id, err)
+		return
+	}
+	defer sh.Close()
+
+	jobCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	runErr := sh.Run(jobCtx, command)
+
+	// Build the log entry regardless of error so users can see when jobs ran.
+	stamp := t.Format("2006-01-02 15:04")
+	entry := fmt.Sprintf("[%s] %s\n%s\n", stamp, command, out.String())
+	if runErr != nil && !errors.Is(runErr, shell.ErrExit) {
+		entry += fmt.Sprintf("# error: %v\n", runErr)
+	}
+
+	// Serialise log writes for this session.
+	ss.cronMu.Lock()
+	defer ss.cronMu.Unlock()
+
+	existing, _ := afero.ReadFile(ss.fs, cron.CronLogFile)
+	updated := append(existing, []byte(entry)...)
+	if writeErr := afero.WriteFile(ss.fs, cron.CronLogFile, updated, 0644); writeErr != nil {
+		log.Printf("cron: session %s: write log: %v", ss.id, writeErr)
 	}
 }
 
@@ -543,6 +660,12 @@ func runServe(cmd *cobra.Command, _ []string) error {
 
 	fmt.Fprintf(os.Stderr, "memsh serve: listening on %s  (session TTL %s, max sessions %d, timeout %s)\n",
 		addr, ttl, maxSessions, timeout)
+
+	// Start the cron scheduler. It aligns to the next minute boundary and then
+	// ticks every minute, running matching jobs for all active sessions.
+	cronCtx, cronCancel := context.WithCancel(context.Background())
+	defer cronCancel()
+	go startCronScheduler(cronCtx, store, baseOpts, timeout)
 
 	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return fmt.Errorf("memsh serve: %w", err)
