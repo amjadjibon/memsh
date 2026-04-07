@@ -192,6 +192,8 @@ func (s *Shell) execHandler(next interp.ExecHandlerFunc) interp.ExecHandlerFunc 
 			return s.builtinRmdir(ctx, args)
 		case "yes":
 			return s.builtinYes(ctx, args)
+		case "clear", "reset":
+			return s.builtinClear(ctx, args)
 		case "env", "printenv":
 			return s.builtinEnv(ctx, args)
 		case "which":
@@ -3033,6 +3035,13 @@ func (s *Shell) builtinYes(ctx context.Context, args []string) error {
 	}
 }
 
+func (s *Shell) builtinClear(_ context.Context, args []string) error {
+	// Write ANSI escape sequences: clear screen then move cursor to top-left.
+	// Works in any VT100-compatible terminal and the memsh web terminal.
+	_, err := fmt.Fprint(s.stdout, "\x1b[2J\x1b[H")
+	return err
+}
+
 func (s *Shell) builtinEnv(ctx context.Context, args []string) error {
 	hc := interp.HandlerCtx(ctx)
 	for k, v := range s.env {
@@ -3282,6 +3291,7 @@ var builtinHelp = map[string][2]string{
 	"sleep":  {"delay for a specified time", "sleep <seconds>"},
 	"sort":   {"sort lines of text", "sort [-r] [-u] [-n] [file]"},
 	"alias":   {"define or display aliases", "alias [name[=value] ...]"},
+	"clear":   {"clear the terminal screen", "clear"},
 	"unalias": {"remove alias definitions", "unalias [-a] name [name ...]"},
 	"source":  {"execute commands from a file", "source <file>"},
 	"stat":   {"show file status", "stat <file>..."},
