@@ -51,6 +51,7 @@ func defaultNativePlugins() []plugins.Plugin {
 		nativegit.GitPlugin{},
 		native.Less(),
 		native.More(),
+		native.SSHPlugin{},
 	}
 }
 

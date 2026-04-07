@@ -2,25 +2,31 @@ package cmd
 
 import (
 	"context"
+	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/subtle"
 	_ "embed"
 	"encoding/hex"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
 
+	gliderssh "github.com/gliderlabs/ssh"
 	"github.com/spf13/afero"
 	"github.com/spf13/cobra"
+	gossh "golang.org/x/crypto/ssh"
 
 	"github.com/amjadjibon/memsh/shell"
 	"github.com/amjadjibon/memsh/shell/plugins/native"
@@ -201,6 +207,9 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	corsOrigin, _ := cmd.Flags().GetString("cors-origin")
 	apiKey, _ := cmd.Flags().GetString("api-key")
 	maxSessions, _ := cmd.Flags().GetInt("max-sessions")
+	sshEnabled, _ := cmd.Flags().GetBool("ssh")
+	sshAddr, _ := cmd.Flags().GetString("ssh-addr")
+	sshHostKey, _ := cmd.Flags().GetString("ssh-host-key")
 
 	ttl, err := time.ParseDuration(ttlStr)
 	if err != nil {
@@ -356,12 +365,32 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	// Graceful shutdown on SIGINT / SIGTERM.
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+
+	// Start SSH server if requested.
+	var sshSrv *gliderssh.Server
+	if sshEnabled {
+		var sshErr error
+		sshSrv, sshErr = buildSSHServer(sshAddr, apiKey, sshHostKey, store, baseOpts, timeout)
+		if sshErr != nil {
+			return fmt.Errorf("memsh serve: SSH: %w", sshErr)
+		}
+		go func() {
+			fmt.Fprintf(os.Stderr, "memsh serve: SSH listening on %s\n", sshAddr)
+			if err := sshSrv.ListenAndServe(); err != nil && !errors.Is(err, gliderssh.ErrServerClosed) {
+				log.Printf("memsh serve: SSH: %v", err)
+			}
+		}()
+	}
+
 	go func() {
 		<-sigCh
 		fmt.Fprintln(os.Stderr, "\nmemsh serve: shutting down...")
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		_ = srv.Shutdown(ctx)
+		if sshSrv != nil {
+			_ = sshSrv.Close()
+		}
 	}()
 
 	fmt.Fprintf(os.Stderr, "memsh serve: listening on %s  (session TTL %s, max sessions %d, timeout %s)\n",
@@ -371,6 +400,256 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("memsh serve: %w", err)
 	}
 	return nil
+}
+
+// buildSSHServer creates a gliderlabs SSH server backed by the memsh session
+// store.  Each connection is identified by its SSH username, which is used as
+// the session ID so that the virtual filesystem persists across reconnects.
+func buildSSHServer(addr, apiKey, hostKeyFile string, store *sessionStore, baseOpts []shell.Option, timeout time.Duration) (*gliderssh.Server, error) {
+	signer, err := loadOrGenerateHostKey(hostKeyFile)
+	if err != nil {
+		return nil, err
+	}
+
+	srv := &gliderssh.Server{
+		Addr:        addr,
+		HostSigners: []gliderssh.Signer{signer},
+		Handler: func(s gliderssh.Session) {
+			handleSSHSession(s, store, baseOpts, timeout)
+		},
+	}
+
+	if apiKey != "" {
+		// Require password == API key.
+		srv.PasswordHandler = func(_ gliderssh.Context, password string) bool {
+			return subtle.ConstantTimeCompare([]byte(password), []byte(apiKey)) == 1
+		}
+	}
+	// No API key → leave all auth handlers nil; gliderlabs/ssh will set
+	// NoClientAuth = true automatically, so no password prompt is shown.
+
+	return srv, nil
+}
+
+// handleSSHSession runs a memsh shell for an incoming SSH connection.
+//
+// The SSH username is used as the session ID so the virtual FS persists across
+// reconnects.  If the client supplies a command (non-interactive mode) it is
+// run once and the session exits.  Otherwise an interactive REPL is served.
+//
+// PTY handling: when the SSH client requests a PTY (as the system ssh(1) does
+// for interactive sessions), input arrives one raw byte at a time with no line
+// buffering.  sshReadLine reads characters, echoes them, and handles backspace /
+// Ctrl-C / Ctrl-D so the user gets a proper editing experience.  Command output
+// has bare LF translated to CR+LF so it renders correctly in the remote terminal.
+func handleSSHSession(s gliderssh.Session, store *sessionStore, baseOpts []shell.Option, timeout time.Duration) {
+	sessionID := s.User()
+	if sessionID == "" || sessionID == "memsh" {
+		b := make([]byte, 8)
+		_, _ = rand.Read(b)
+		sessionID = fmt.Sprintf("%x", b)
+	}
+
+	entry, ok := store.get(sessionID)
+	if !ok {
+		fmt.Fprintln(s.Stderr(), "error: maximum number of sessions reached")
+		_ = s.Exit(1)
+		return
+	}
+
+	cmdArgs := s.Command()
+
+	// ── non-interactive: single command ──────────────────────────────────
+	if len(cmdArgs) > 0 {
+		script := strings.Join(cmdArgs, " ")
+
+		opts := make([]shell.Option, len(baseOpts), len(baseOpts)+3)
+		copy(opts, baseOpts)
+		opts = append(opts,
+			shell.WithFS(entry.fs),
+			shell.WithCwd(entry.cwd),
+			shell.WithStdIO(s, s, s.Stderr()),
+		)
+
+		sh, err := shell.New(opts...)
+		if err != nil {
+			fmt.Fprintf(s.Stderr(), "error: %v\n", err)
+			_ = s.Exit(1)
+			return
+		}
+		defer sh.Close()
+
+		ctx, cancel := context.WithTimeout(s.Context(), timeout)
+		defer cancel()
+
+		runErr := sh.Run(ctx, script)
+		store.updateCwd(sessionID, sh.Cwd())
+
+		if runErr != nil && !errors.Is(runErr, shell.ErrExit) {
+			_ = s.Exit(1)
+		} else {
+			_ = s.Exit(0)
+		}
+		return
+	}
+
+	// ── interactive REPL ─────────────────────────────────────────────────
+	cwd := entry.cwd
+	for {
+		// Print prompt — use CR+LF so the cursor returns to column 0.
+		fmt.Fprintf(s, "memsh:%s$ ", cwd)
+
+		line, err := sshReadLine(s)
+		if err != nil {
+			// io.EOF → client pressed Ctrl-D on empty line or disconnected.
+			break
+		}
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if line == "exit" || line == "quit" {
+			fmt.Fprint(s, "logout\r\n")
+			break
+		}
+
+		var cmdOut strings.Builder
+		opts := make([]shell.Option, len(baseOpts), len(baseOpts)+3)
+		copy(opts, baseOpts)
+		opts = append(opts,
+			shell.WithFS(entry.fs),
+			shell.WithCwd(cwd),
+			shell.WithStdIO(strings.NewReader(""), &cmdOut, &cmdOut),
+		)
+
+		sh, shErr := shell.New(opts...)
+		if shErr != nil {
+			fmt.Fprintf(s, "error: %v\r\n", shErr)
+			continue
+		}
+
+		ctx, cancel := context.WithTimeout(s.Context(), timeout)
+		runErr := sh.Run(ctx, line)
+		cancel()
+		newCwd := sh.Cwd()
+		sh.Close()
+
+		store.updateCwd(sessionID, newCwd)
+		cwd = newCwd
+
+		// Translate bare LF → CR+LF for the remote terminal.
+		output := strings.ReplaceAll(cmdOut.String(), "\r\n", "\n") // normalise first
+		output = strings.ReplaceAll(output, "\n", "\r\n")
+		fmt.Fprint(s, output)
+
+		if runErr != nil && !errors.Is(runErr, shell.ErrExit) {
+			fmt.Fprintf(s, "%v\r\n", runErr)
+		}
+	}
+	_ = s.Exit(0)
+}
+
+// sshReadLine reads one line of input from an SSH PTY session.
+//
+// The PTY delivers raw bytes: Enter sends CR (\r), not LF (\n).  Characters
+// must be echoed back manually.  Basic editing is supported:
+//   - Backspace / DEL (0x7f): erase last character
+//   - Ctrl-U (0x15):          kill entire line
+//   - Ctrl-C (0x03):          discard line, return empty string (not an error)
+//   - Ctrl-D (0x04):          EOF when the line is empty; ignored otherwise
+func sshReadLine(r io.Reader) (string, error) {
+	var line []byte
+	buf := make([]byte, 1)
+	for {
+		_, err := r.Read(buf)
+		if err != nil {
+			return string(line), err
+		}
+		c := buf[0]
+		switch {
+		case c == '\r' || c == '\n':
+			// Echo CR+LF so the cursor moves to the next line before output appears.
+			if w, ok := r.(io.Writer); ok {
+				_, _ = w.Write([]byte("\r\n"))
+			}
+			return string(line), nil
+		case c == 127 || c == '\b': // DEL / backspace
+			if len(line) > 0 {
+				line = line[:len(line)-1]
+				// Erase character: move back, print space, move back again.
+				if w, ok := r.(io.Writer); ok {
+					_, _ = w.Write([]byte("\b \b"))
+				}
+			}
+		case c == 21: // Ctrl-U: kill line
+			if len(line) > 0 {
+				if w, ok := r.(io.Writer); ok {
+					_, _ = w.Write([]byte(strings.Repeat("\b", len(line)) +
+						strings.Repeat(" ", len(line)) +
+						strings.Repeat("\b", len(line))))
+				}
+				line = line[:0]
+			}
+		case c == 3: // Ctrl-C: discard line
+			if w, ok := r.(io.Writer); ok {
+				_, _ = w.Write([]byte("^C\r\n"))
+			}
+			return "", nil // empty line — caller reprints prompt
+		case c == 4: // Ctrl-D: EOF only on empty line
+			if len(line) == 0 {
+				return "", io.EOF
+			}
+		case c >= 32 && c < 127: // printable ASCII
+			line = append(line, c)
+			if w, ok := r.(io.Writer); ok {
+				_, _ = w.Write([]byte{c})
+			}
+		}
+	}
+}
+
+// loadOrGenerateHostKey loads a persistent Ed25519 host key from keyFile, or
+// generates a new one and saves it if the file does not exist.  A stable host
+// key prevents "REMOTE HOST IDENTIFICATION HAS CHANGED" warnings on reconnect.
+//
+// keyFile defaults to ~/.memsh/ssh_host_key when empty.
+func loadOrGenerateHostKey(keyFile string) (gliderssh.Signer, error) {
+	if keyFile == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			home = "."
+		}
+		keyFile = filepath.Join(home, ".memsh", "ssh_host_key")
+	}
+
+	// Try to load an existing key.
+	if data, err := os.ReadFile(keyFile); err == nil {
+		signer, parseErr := gossh.ParsePrivateKey(data)
+		if parseErr == nil {
+			return signer, nil
+		}
+		log.Printf("memsh serve: SSH: could not parse host key %s (%v); generating new key", keyFile, parseErr)
+	}
+
+	// Generate a fresh Ed25519 key and persist it.
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		return nil, fmt.Errorf("generate host key: %w", err)
+	}
+	signer, err := gossh.NewSignerFromKey(priv)
+	if err != nil {
+		return nil, fmt.Errorf("create signer: %w", err)
+	}
+
+	pemBlock, err := gossh.MarshalPrivateKey(priv, "memsh ssh host key")
+	if err == nil {
+		if mkErr := os.MkdirAll(filepath.Dir(keyFile), 0700); mkErr == nil {
+			_ = os.WriteFile(keyFile, pem.EncodeToMemory(pemBlock), 0600)
+			log.Printf("memsh serve: SSH: host key saved to %s", keyFile)
+		}
+	}
+
+	return signer, nil
 }
 
 // buildShellOpts converts the loaded config into shell options.
@@ -464,5 +743,8 @@ func init() {
 	serveCmd.Flags().String("cors-origin", "", "Allowed CORS origin (e.g. 'https://example.com'). Empty = no CORS headers.")
 	serveCmd.Flags().String("api-key", "", "API key for authentication. When set, mutating endpoints require 'Authorization: Bearer <key>'.")
 	serveCmd.Flags().Int("max-sessions", 100, "Maximum number of concurrent sessions (0 = unlimited)")
+	serveCmd.Flags().Bool("ssh", false, "Enable SSH server for remote shell access")
+	serveCmd.Flags().String("ssh-addr", ":2222", "SSH server listen address (used with --ssh); binds all interfaces so both localhost and 127.0.0.1 work")
+	serveCmd.Flags().String("ssh-host-key", "", "Path to persist the SSH host key (default ~/.memsh/ssh_host_key); stable key avoids known_hosts warnings")
 	rootCmd.AddCommand(serveCmd)
 }
