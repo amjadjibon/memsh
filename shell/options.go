@@ -22,6 +22,7 @@ type BuiltinFunc func(ctx context.Context, args []string) error
 func WithPlugin(p plugins.Plugin) Option {
 	return func(s *Shell) {
 		s.builtins[p.Name()] = p.Run
+		s.nativePlugins[p.Name()] = p
 	}
 }
 
@@ -125,6 +126,7 @@ func WithDisabledPlugins(names ...string) Option {
 	return func(s *Shell) {
 		for _, name := range names {
 			delete(s.builtins, name)
+			delete(s.nativePlugins, name)
 			delete(s.plugins, name)
 		}
 	}

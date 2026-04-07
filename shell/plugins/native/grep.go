@@ -27,25 +27,79 @@ func (GrepPlugin) Run(ctx context.Context, args []string) error {
 	sc := plugins.ShellCtx(ctx)
 
 	caseInsensitive, showLineNums, invertMatch, recursive := false, false, false, false
+	countMode, listFiles, wholeWord, onlyMatch := false, false, false, false
 	var pattern string
 	var files []string
 
+	endOfFlags := false
 	for i := 1; i < len(args); i++ {
-		switch args[i] {
-		case "-i":
-			caseInsensitive = true
-		case "-n":
-			showLineNums = true
-		case "-v":
-			invertMatch = true
-		case "-r", "-R":
-			recursive = true
-		default:
+		a := args[i]
+		if endOfFlags || a == "" || a[0] != '-' {
 			if pattern == "" {
-				pattern = args[i]
+				pattern = a
 			} else {
-				files = append(files, args[i])
+				files = append(files, a)
 			}
+			continue
+		}
+		if a == "--" {
+			endOfFlags = true
+			continue
+		}
+		switch a {
+		case "--ignore-case":
+			caseInsensitive = true
+			continue
+		case "--line-number":
+			showLineNums = true
+			continue
+		case "--invert-match":
+			invertMatch = true
+			continue
+		case "--recursive":
+			recursive = true
+			continue
+		case "--count":
+			countMode = true
+			continue
+		case "--files-with-matches":
+			listFiles = true
+			continue
+		case "--word-regexp":
+			wholeWord = true
+			continue
+		case "--only-matching":
+			onlyMatch = true
+			continue
+		case "--extended-regexp", "--quiet", "--silent":
+			continue
+		}
+		unknown := ""
+		for _, c := range a[1:] {
+			switch c {
+			case 'i':
+				caseInsensitive = true
+			case 'n':
+				showLineNums = true
+			case 'v':
+				invertMatch = true
+			case 'r', 'R':
+				recursive = true
+			case 'c':
+				countMode = true
+			case 'l':
+				listFiles = true
+			case 'w':
+				wholeWord = true
+			case 'E', 'q', 's':
+			case 'o':
+				onlyMatch = true
+			default:
+				unknown += string(c)
+			}
+		}
+		if unknown != "" {
+			return fmt.Errorf("grep: invalid option -- '%s'", unknown)
 		}
 	}
 
@@ -55,16 +109,19 @@ func (GrepPlugin) Run(ctx context.Context, args []string) error {
 	if caseInsensitive {
 		pattern = "(?i)" + pattern
 	}
+	if wholeWord {
+		pattern = `\b` + pattern + `\b`
+	}
 	re, err := regexp.Compile(pattern)
 	if err != nil {
-		return fmt.Errorf("grep: invalid pattern: %v", err)
+		return fmt.Errorf("grep: invalid pattern: %w", err)
 	}
 
 	multiFile := len(files) > 1 || recursive
 	matched := false
 
 	if len(files) == 0 {
-		m, err := grepReader(hc.Stdin, hc.Stdout, "", re, invertMatch, showLineNums)
+		m, err := grepReader(hc.Stdin, hc.Stdout, "", re, invertMatch, showLineNums, countMode, listFiles, onlyMatch, multiFile)
 		if err != nil {
 			return err
 		}
@@ -95,7 +152,7 @@ func (GrepPlugin) Run(ctx context.Context, args []string) error {
 					if multiFile {
 						label = path
 					}
-					m, _ := grepReader(r, hc.Stdout, label, re, invertMatch, showLineNums)
+					m, _ := grepReader(r, hc.Stdout, label, re, invertMatch, showLineNums, countMode, listFiles, onlyMatch, multiFile)
 					if m {
 						matched = true
 					}
@@ -110,9 +167,9 @@ func (GrepPlugin) Run(ctx context.Context, args []string) error {
 			}
 			label := ""
 			if multiFile {
-				label = abs
+				label = f
 			}
-			m, grepErr := grepReader(r, hc.Stdout, label, re, invertMatch, showLineNums)
+			m, grepErr := grepReader(r, hc.Stdout, label, re, invertMatch, showLineNums, countMode, listFiles, onlyMatch, multiFile)
 			r.Close()
 			if m {
 				matched = true
@@ -123,16 +180,17 @@ func (GrepPlugin) Run(ctx context.Context, args []string) error {
 		}
 	}
 
-	if !matched {
+	if !matched && !invertMatch {
 		return interp.ExitStatus(1)
 	}
 	return nil
 }
 
-func grepReader(r io.Reader, w io.Writer, label string, re *regexp.Regexp, invert, lineNums bool) (bool, error) {
+func grepReader(r io.Reader, w io.Writer, label string, re *regexp.Regexp, invert, lineNums, countMode, listFiles, onlyMatch, multiFile bool) (bool, error) {
 	sc := bufio.NewScanner(r)
 	lineNum := 0
 	matched := false
+	matchCount := 0
 	for sc.Scan() {
 		lineNum++
 		line := sc.Text()
@@ -144,16 +202,45 @@ func grepReader(r io.Reader, w io.Writer, label string, re *regexp.Regexp, inver
 			continue
 		}
 		matched = true
-		switch {
-		case label != "" && lineNums:
-			fmt.Fprintf(w, "%s:%d:%s\n", label, lineNum, line)
-		case label != "":
-			fmt.Fprintf(w, "%s:%s\n", label, line)
-		case lineNums:
-			fmt.Fprintf(w, "%d:%s\n", lineNum, line)
-		default:
-			fmt.Fprintln(w, line)
+		matchCount++
+
+		if listFiles {
+			if label != "" {
+				fmt.Fprintln(w, label)
+			}
+			return true, nil
 		}
+		if countMode {
+			continue
+		}
+
+		prefix := ""
+		if multiFile && label != "" {
+			prefix = label + ":"
+		}
+		if onlyMatch {
+			locs := re.FindAllStringIndex(line, -1)
+			for _, loc := range locs {
+				if lineNums {
+					fmt.Fprintf(w, "%s%d:%s\n", prefix, lineNum, line[loc[0]:loc[1]])
+				} else {
+					fmt.Fprintf(w, "%s%s\n", prefix, line[loc[0]:loc[1]])
+				}
+			}
+			continue
+		}
+		if lineNums {
+			fmt.Fprintf(w, "%s%d:%s\n", prefix, lineNum, line)
+		} else {
+			fmt.Fprintf(w, "%s%s\n", prefix, line)
+		}
+	}
+	if countMode && matched {
+		prefix := ""
+		if multiFile && label != "" {
+			prefix = label + ":"
+		}
+		fmt.Fprintf(w, "%s%d\n", prefix, matchCount)
 	}
 	return matched, sc.Err()
 }

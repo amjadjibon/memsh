@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"mvdan.cc/sh/v3/interp"
 	gossh "golang.org/x/crypto/ssh"
 	"golang.org/x/term"
+	"mvdan.cc/sh/v3/interp"
 
 	"github.com/amjadjibon/memsh/shell/plugins"
 )
@@ -80,7 +80,7 @@ func (SSHPlugin) Run(ctx context.Context, args []string) error {
 			}
 		case len(a) > 2 && a[:2] == "-P":
 			portOverride = a[2:]
-		// ignore other flags for compatibility (-o, -i, etc.)
+			// ignore other flags for compatibility (-o, -i, etc.)
 		}
 	}
 

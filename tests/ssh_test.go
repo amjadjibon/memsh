@@ -33,10 +33,7 @@ func startTestSSHServer(t *testing.T, fs afero.Fs, apiKey string) string {
 	}
 
 	// Find a free port.
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("listen: %v", err)
-	}
+	ln := newLoopbackListener(t)
 	addr := ln.Addr().String()
 	ln.Close()
 

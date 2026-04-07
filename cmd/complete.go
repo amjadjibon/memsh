@@ -1,19 +1,10 @@
 package cmd
 
 import (
-	"sort"
 	"strings"
 
 	"github.com/amjadjibon/memsh/shell"
 )
-
-var builtinCmds = []string{
-	"awk", "base64", "cat", "cd", "chmod", "cp", "cut", "date", "diff",
-	"du", "df", "echo", "env", "exit", "find", "grep", "head", "help",
-	"ln", "ls", "man", "mkdir", "mv", "printf", "pwd", "read", "rm",
-	"rmdir", "sed", "seq", "sleep", "sort", "source", "stat", "tail",
-	"tee", "touch", "tr", "uniq", "wc", "which", "xargs", "yes",
-}
 
 type replCompleter struct {
 	sh *shell.Shell
@@ -34,11 +25,7 @@ func (c *replCompleter) Do(line []rune, pos int) ([][]rune, int) {
 }
 
 func (c *replCompleter) allCommands() []string {
-	cmds := make([]string, len(builtinCmds))
-	copy(cmds, builtinCmds)
-	cmds = append(cmds, c.sh.RegisteredPlugins()...)
-	sort.Strings(cmds)
-	return cmds
+	return c.sh.Commands()
 }
 
 func (c *replCompleter) completePath(partial string) ([][]rune, int) {

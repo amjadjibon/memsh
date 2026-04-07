@@ -5,10 +5,9 @@ import (
 	"fmt"
 	"io"
 	"strings"
-	"unicode"
 
-	"github.com/spf13/afero"
 	"github.com/amjadjibon/memsh/shell/plugins"
+	"github.com/spf13/afero"
 	"mvdan.cc/sh/v3/interp"
 )
 
@@ -28,16 +27,43 @@ func (WcPlugin) Run(ctx context.Context, args []string) error {
 	showLines, showWords, showBytes := false, false, false
 	var files []string
 
-	for _, a := range args[1:] {
-		switch a {
-		case "-l":
-			showLines = true
-		case "-w":
-			showWords = true
-		case "-c":
-			showBytes = true
-		default:
+	endOfFlags := false
+	for i := 1; i < len(args); i++ {
+		a := args[i]
+		if endOfFlags || a == "" || a[0] != '-' {
 			files = append(files, a)
+			continue
+		}
+		if a == "--" {
+			endOfFlags = true
+			continue
+		}
+		switch a {
+		case "--lines":
+			showLines = true
+			continue
+		case "--words":
+			showWords = true
+			continue
+		case "--bytes":
+			showBytes = true
+			continue
+		}
+		unknown := ""
+		for _, c := range a[1:] {
+			switch c {
+			case 'l':
+				showLines = true
+			case 'w':
+				showWords = true
+			case 'c':
+				showBytes = true
+			default:
+				unknown += string(c)
+			}
+		}
+		if unknown != "" {
+			return fmt.Errorf("wc: invalid option -- '%s'", unknown)
 		}
 	}
 
@@ -45,52 +71,71 @@ func (WcPlugin) Run(ctx context.Context, args []string) error {
 		showLines, showWords, showBytes = true, true, true
 	}
 
-	var input []byte
-	if len(files) > 0 && sc.FS != nil {
-		data, err := afero.ReadFile(sc.FS, sc.ResolvePath(files[0]))
-		if err != nil {
-			return fmt.Errorf("wc: %s: %w", files[0], err)
+	totalLines, totalWords, totalBytes := 0, 0, 0
+	printCounts := func(data []byte, name string) {
+		lines, words, bytesCount := wcCount(data)
+		totalLines += lines
+		totalWords += words
+		totalBytes += bytesCount
+
+		var parts []string
+		if showLines {
+			parts = append(parts, fmt.Sprintf("%d", lines))
 		}
-		input = data
-	} else {
+		if showWords {
+			parts = append(parts, fmt.Sprintf("%d", words))
+		}
+		if showBytes {
+			parts = append(parts, fmt.Sprintf("%d", bytesCount))
+		}
+		if name != "" {
+			parts = append(parts, name)
+		}
+		fmt.Fprintln(hc.Stdout, strings.Join(parts, " "))
+	}
+
+	if len(files) == 0 {
 		data, err := io.ReadAll(hc.Stdin)
 		if err != nil {
 			return err
 		}
-		input = data
+		printCounts(data, "")
+		return nil
 	}
 
-	lines, words, bytes_ := wcCount(input)
-	var parts []string
-	if showLines {
-		parts = append(parts, fmt.Sprintf("%d", lines))
+	for _, file := range files {
+		data, err := afero.ReadFile(sc.FS, sc.ResolvePath(file))
+		if err != nil {
+			return fmt.Errorf("wc: %s: %w", file, err)
+		}
+		printCounts(data, file)
 	}
-	if showWords {
-		parts = append(parts, fmt.Sprintf("%d", words))
+
+	if len(files) > 1 {
+		var parts []string
+		if showLines {
+			parts = append(parts, fmt.Sprintf("%d", totalLines))
+		}
+		if showWords {
+			parts = append(parts, fmt.Sprintf("%d", totalWords))
+		}
+		if showBytes {
+			parts = append(parts, fmt.Sprintf("%d", totalBytes))
+		}
+		parts = append(parts, "total")
+		fmt.Fprintln(hc.Stdout, strings.Join(parts, " "))
 	}
-	if showBytes {
-		parts = append(parts, fmt.Sprintf("%d", bytes_))
-	}
-	fmt.Fprintln(hc.Stdout, strings.Join(parts, " "))
 	return nil
 }
 
 func wcCount(data []byte) (lines, words, bytes_ int) {
 	bytes_ = len(data)
-	inWord := false
-	for _, b := range data {
-		if b == '\n' {
-			lines++
-		}
-		if unicode.IsSpace(rune(b)) {
-			inWord = false
-		} else {
-			if !inWord {
-				words++
-			}
-			inWord = true
-		}
+	content := string(data)
+	lines = strings.Count(content, "\n")
+	if len(content) > 0 && !strings.HasSuffix(content, "\n") {
+		lines++
 	}
+	words = len(strings.Fields(content))
 	return
 }
 
