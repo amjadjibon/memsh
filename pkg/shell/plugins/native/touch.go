@@ -3,9 +3,10 @@ package native
 import (
 	"context"
 	"fmt"
-	"github.com/amjadjibon/memsh/pkg/shell/plugins"
 	"os"
 	"time"
+
+	"github.com/amjadjibon/memsh/pkg/shell/plugins"
 )
 
 type TouchPlugin struct{}

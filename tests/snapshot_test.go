@@ -12,9 +12,9 @@ import (
 
 func TestSnapshotRoundTrip(t *testing.T) {
 	fs := afero.NewMemMapFs()
-	_ = afero.WriteFile(fs, "/hello.txt", []byte("hello world\n"), 0644)
-	_ = fs.MkdirAll("/subdir", 0755)
-	_ = afero.WriteFile(fs, "/subdir/data.json", []byte(`{"key":"value"}`), 0600)
+	_ = afero.WriteFile(fs, "/hello.txt", []byte("hello world\n"), 0o644)
+	_ = fs.MkdirAll("/subdir", 0o755)
+	_ = afero.WriteFile(fs, "/subdir/data.json", []byte(`{"key":"value"}`), 0o600)
 
 	snap, err := shell.TakeSnapshot(fs, "/subdir")
 	if err != nil {
@@ -51,9 +51,9 @@ func TestSnapshotRoundTrip(t *testing.T) {
 
 func TestSnapshotRestoreFS(t *testing.T) {
 	fs := afero.NewMemMapFs()
-	_ = afero.WriteFile(fs, "/greeting.txt", []byte("hi there\n"), 0644)
-	_ = fs.MkdirAll("/configs", 0755)
-	_ = afero.WriteFile(fs, "/configs/app.cfg", []byte("port=8080\n"), 0600)
+	_ = afero.WriteFile(fs, "/greeting.txt", []byte("hi there\n"), 0o644)
+	_ = fs.MkdirAll("/configs", 0o755)
+	_ = afero.WriteFile(fs, "/configs/app.cfg", []byte("port=8080\n"), 0o600)
 
 	snap, err := shell.TakeSnapshot(fs, "/")
 	if err != nil {
@@ -89,7 +89,7 @@ func TestSnapshotRestoreFS(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stat: %v", err)
 	}
-	if info.Mode() != 0600 {
+	if info.Mode() != 0o600 {
 		t.Errorf("mode = %o, want 0600", info.Mode())
 	}
 }
@@ -174,8 +174,8 @@ func TestSnapshotUnsupportedVersion(t *testing.T) {
 
 func TestSnapshotDirectoryStructure(t *testing.T) {
 	fs := afero.NewMemMapFs()
-	_ = fs.MkdirAll("/a/b/c", 0755)
-	_ = afero.WriteFile(fs, "/a/b/c/deep.txt", []byte("deep"), 0644)
+	_ = fs.MkdirAll("/a/b/c", 0o755)
+	_ = afero.WriteFile(fs, "/a/b/c/deep.txt", []byte("deep"), 0o644)
 
 	snap, err := shell.TakeSnapshot(fs, "/")
 	if err != nil {

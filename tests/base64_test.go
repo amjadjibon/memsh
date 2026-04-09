@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/spf13/afero"
 	"github.com/amjadjibon/memsh/pkg/shell"
+	"github.com/spf13/afero"
 )
 
 func TestBase64(t *testing.T) {
@@ -38,7 +38,7 @@ func TestBase64(t *testing.T) {
 
 	t.Run("base64 encode file via stdin", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		afero.WriteFile(fs, "/file.bin", []byte("test data"), 0644)
+		afero.WriteFile(fs, "/file.bin", []byte("test data"), 0o644)
 		var buf strings.Builder
 		s := NewTestShell(t, &buf, shell.WithFS(fs))
 

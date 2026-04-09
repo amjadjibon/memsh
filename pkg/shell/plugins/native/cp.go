@@ -113,7 +113,7 @@ func cpDir(fs afero.Fs, src, dst string) error {
 		}
 		target := filepath.Join(dst, rel)
 		if info.IsDir() {
-			return fs.MkdirAll(target, 0755)
+			return fs.MkdirAll(target, 0o755)
 		}
 		return cpFile(fs, path, target)
 	})

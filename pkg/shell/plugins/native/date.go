@@ -3,8 +3,9 @@ package native
 import (
 	"context"
 	"fmt"
-	"mvdan.cc/sh/v3/interp"
 	"time"
+
+	"mvdan.cc/sh/v3/interp"
 )
 
 type DatePlugin struct{}

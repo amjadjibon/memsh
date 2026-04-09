@@ -3,8 +3,9 @@ package native
 import (
 	"context"
 	"fmt"
-	"mvdan.cc/sh/v3/interp"
 	"strconv"
+
+	"mvdan.cc/sh/v3/interp"
 )
 
 type SeqPlugin struct{}

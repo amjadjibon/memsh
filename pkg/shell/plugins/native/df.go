@@ -3,6 +3,7 @@ package native
 import (
 	"context"
 	"fmt"
+
 	"mvdan.cc/sh/v3/interp"
 )
 

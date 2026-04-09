@@ -73,7 +73,7 @@ func TestEnvsubst(t *testing.T) {
 
 	t.Run("reads from virtual FS file", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		afero.WriteFile(fs, "/tmpl.txt", []byte("Hello, $NAME!\n"), 0644)
+		afero.WriteFile(fs, "/tmpl.txt", []byte("Hello, $NAME!\n"), 0o644)
 		var buf strings.Builder
 		s := NewTestShell(t, &buf, shell.WithFS(fs), shell.WithEnv(map[string]string{"NAME": "World"}))
 		if err := s.Run(ctx, "envsubst /tmpl.txt"); err != nil {
@@ -86,7 +86,7 @@ func TestEnvsubst(t *testing.T) {
 
 	t.Run("multi-variable template file", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		afero.WriteFile(fs, "/config.tmpl", []byte("host=${HOST}\nport=${PORT}\n"), 0644)
+		afero.WriteFile(fs, "/config.tmpl", []byte("host=${HOST}\nport=${PORT}\n"), 0o644)
 		var buf strings.Builder
 		s := NewTestShell(t, &buf, shell.WithFS(fs),
 			shell.WithEnv(map[string]string{"HOST": "localhost", "PORT": "8080"}))
@@ -101,7 +101,7 @@ func TestEnvsubst(t *testing.T) {
 
 	t.Run("pipe output to file", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		afero.WriteFile(fs, "/in.txt", []byte("$GREETING world"), 0644)
+		afero.WriteFile(fs, "/in.txt", []byte("$GREETING world"), 0o644)
 		var buf strings.Builder
 		s := NewTestShell(t, &buf, shell.WithFS(fs),
 			shell.WithEnv(map[string]string{"GREETING": "hello"}))
@@ -126,8 +126,8 @@ func TestEnvsubst(t *testing.T) {
 
 	t.Run("multiple files processed in order", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		afero.WriteFile(fs, "/a.txt", []byte("$X"), 0644)
-		afero.WriteFile(fs, "/b.txt", []byte("$Y"), 0644)
+		afero.WriteFile(fs, "/a.txt", []byte("$X"), 0o644)
+		afero.WriteFile(fs, "/b.txt", []byte("$Y"), 0o644)
 		var buf strings.Builder
 		s := NewTestShell(t, &buf, shell.WithFS(fs),
 			shell.WithEnv(map[string]string{"X": "hello", "Y": "world"}))

@@ -56,7 +56,7 @@ func TestPhp(t *testing.T) {
 
 	t.Run("php executes file from virtual FS", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		afero.WriteFile(fs, "/script.php", []byte(`<?php echo "hello from file\n";`), 0644)
+		afero.WriteFile(fs, "/script.php", []byte(`<?php echo "hello from file\n";`), 0o644)
 		var buf strings.Builder
 		s := NewTestShell(t, &buf, shell.WithFS(fs), shell.WithWASMEnabled(true))
 
@@ -97,7 +97,7 @@ func TestPhp(t *testing.T) {
 
 	t.Run("php file I/O operations", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		afero.WriteFile(fs, "/test.txt", []byte("hello from fs"), 0644)
+		afero.WriteFile(fs, "/test.txt", []byte("hello from fs"), 0o644)
 		var buf strings.Builder
 		s := NewTestShell(t, &buf, shell.WithFS(fs), shell.WithWASMEnabled(true))
 

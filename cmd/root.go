@@ -311,7 +311,7 @@ func historyFile() string {
 	if info, err := os.Stat(dir); err == nil && !info.IsDir() {
 		os.Remove(dir)
 	}
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return ""
 	}
 	ts := fmt.Appendf(nil, "%d", time.Now().UnixNano())

@@ -3,12 +3,13 @@ package native
 import (
 	"bufio"
 	"fmt"
-	calc "github.com/amjadjibon/calc-go"
 	"io"
 	"math"
-	"mvdan.cc/sh/v3/interp"
 	"strconv"
 	"strings"
+
+	calc "github.com/amjadjibon/calc-go"
+	"mvdan.cc/sh/v3/interp"
 )
 
 func evalExpr(expr string, scale int) (string, error) {

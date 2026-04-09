@@ -280,7 +280,7 @@ func cmdGitClone(w io.Writer, errW io.Writer, fs afero.Fs, cwd string, args []st
 		return interp.ExitStatus(1)
 	}
 
-	if err := fs.MkdirAll(target, 0755); err != nil {
+	if err := fs.MkdirAll(target, 0o755); err != nil {
 		return fmt.Errorf("git clone: %w", err)
 	}
 
@@ -322,7 +322,7 @@ func cmdGitInit(w io.Writer, fs afero.Fs, cwd string, args []string) error {
 			target = filepath.Join(cwd, args[0])
 		}
 	}
-	if err := fs.MkdirAll(target, 0755); err != nil {
+	if err := fs.MkdirAll(target, 0o755); err != nil {
 		return fmt.Errorf("git init: %w", err)
 	}
 	storer := openStorage(fs, target)
@@ -987,7 +987,7 @@ func cmdGitCheckout(w io.Writer, errW io.Writer, fs afero.Fs, cwd string, args [
 	if err != nil {
 		return err
 	}
-	return afero.WriteFile(fs, abs, []byte(content), 0644)
+	return afero.WriteFile(fs, abs, []byte(content), 0o644)
 }
 
 // ---------------------------------------------------------------------------

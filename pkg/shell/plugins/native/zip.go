@@ -35,12 +35,14 @@ func (z ZipPlugin) Name() string {
 	}
 	return "zip"
 }
+
 func (z ZipPlugin) Description() string {
 	if z.unzip {
 		return "extract files from a zip archive"
 	}
 	return "create or update zip archives"
 }
+
 func (ZipPlugin) Usage() string {
 	return "zip [-r] [-0..-9] <archive.zip> <file...> | unzip [-l] [-d dir] <archive.zip>"
 }

@@ -16,7 +16,7 @@ func MemshDir() (string, error) {
 		return "", err
 	}
 	dir := filepath.Join(home, ".memsh")
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}
 	return dir, nil
@@ -50,7 +50,7 @@ func HistoryDir() (string, error) {
 		return "", err
 	}
 	dir := filepath.Join(home, ".memsh", "history")
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}
 	return dir, nil
@@ -64,7 +64,7 @@ func PluginDir() (string, error) {
 		return "", err
 	}
 	dir := filepath.Join(home, ".memsh", "plugins")
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}
 	return dir, nil

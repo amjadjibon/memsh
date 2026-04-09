@@ -114,8 +114,8 @@ func loadOrGenerateHostKey(keyFile string) (gliderssh.Signer, error) {
 		if lastSlash := strings.LastIndex(keyFile, "/"); lastSlash > 0 {
 			dir = keyFile[:lastSlash]
 		}
-		if mkErr := os.MkdirAll(dir, 0700); mkErr == nil {
-			_ = os.WriteFile(keyFile, pem.EncodeToMemory(pemBlock), 0600)
+		if mkErr := os.MkdirAll(dir, 0o700); mkErr == nil {
+			_ = os.WriteFile(keyFile, pem.EncodeToMemory(pemBlock), 0o600)
 			log.Printf("memsh serve: SSH: host key saved to %s", keyFile)
 		}
 	}

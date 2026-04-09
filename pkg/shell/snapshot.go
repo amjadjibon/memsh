@@ -87,7 +87,7 @@ func RestoreSnapshot(snap *Snapshot) (afero.Fs, string, error) {
 		}
 		// Ensure parent directory exists.
 		if dir := filepath.Dir(entry.Path); dir != "/" && dir != "." {
-			if err := fs.MkdirAll(dir, 0755); err != nil {
+			if err := fs.MkdirAll(dir, 0o755); err != nil {
 				return nil, "", fmt.Errorf("snapshot: mkdir parent %s: %w", dir, err)
 			}
 		}

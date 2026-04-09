@@ -28,7 +28,7 @@ func TestColumn(t *testing.T) {
 
 	t.Run("-t aligns whitespace-delimited fields", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		afero.WriteFile(fs, "/data.txt", []byte("Name Age City\nAlice 30 London\nBob 25 Paris\n"), 0644)
+		afero.WriteFile(fs, "/data.txt", []byte("Name Age City\nAlice 30 London\nBob 25 Paris\n"), 0o644)
 		var buf strings.Builder
 		s := NewTestShell(t, &buf, shell.WithFS(fs))
 		if err := s.Run(ctx, "column -t /data.txt"); err != nil {
@@ -161,7 +161,7 @@ func TestColumn(t *testing.T) {
 
 	t.Run("reads from virtual FS file", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		afero.WriteFile(fs, "/hosts.txt", []byte("127.0.0.1 localhost\n192.168.1.1 router\n"), 0644)
+		afero.WriteFile(fs, "/hosts.txt", []byte("127.0.0.1 localhost\n192.168.1.1 router\n"), 0o644)
 		var buf strings.Builder
 		s := NewTestShell(t, &buf, shell.WithFS(fs))
 		if err := s.Run(ctx, "column -t /hosts.txt"); err != nil {

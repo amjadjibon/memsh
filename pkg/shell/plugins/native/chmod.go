@@ -88,7 +88,7 @@ func runChmod(ctx context.Context, args []string) error {
 }
 
 func parseSymbolicMode(spec string) (os.FileMode, error) {
-	mode := os.FileMode(0644)
+	mode := os.FileMode(0o644)
 	for _, part := range strings.Split(spec, ",") {
 		who, op, perm := "", "", ""
 		i := 0
@@ -115,35 +115,35 @@ func parseSymbolicMode(spec string) (os.FileMode, error) {
 				case 'r':
 					switch w {
 					case 'u':
-						bit = 0400
+						bit = 0o400
 					case 'g':
-						bit = 0040
+						bit = 0o040
 					case 'o':
-						bit = 0004
+						bit = 0o004
 					case 'a':
-						bit = 0444
+						bit = 0o444
 					}
 				case 'w':
 					switch w {
 					case 'u':
-						bit = 0200
+						bit = 0o200
 					case 'g':
-						bit = 0020
+						bit = 0o020
 					case 'o':
-						bit = 0002
+						bit = 0o002
 					case 'a':
-						bit = 0222
+						bit = 0o222
 					}
 				case 'x':
 					switch w {
 					case 'u':
-						bit = 0100
+						bit = 0o100
 					case 'g':
-						bit = 0010
+						bit = 0o010
 					case 'o':
-						bit = 0001
+						bit = 0o001
 					case 'a':
-						bit = 0111
+						bit = 0o111
 					}
 				}
 				switch op {
@@ -155,13 +155,13 @@ func parseSymbolicMode(spec string) (os.FileMode, error) {
 					mask := os.FileMode(0)
 					switch w {
 					case 'u':
-						mask = 0700
+						mask = 0o700
 					case 'g':
-						mask = 0070
+						mask = 0o070
 					case 'o':
-						mask = 0007
+						mask = 0o007
 					case 'a':
-						mask = 0777
+						mask = 0o777
 					}
 					mode = (mode &^ mask) | bit
 				}

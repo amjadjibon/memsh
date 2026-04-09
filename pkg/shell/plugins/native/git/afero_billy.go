@@ -134,7 +134,7 @@ func (a *aferoFS) TempFile(dir, prefix string) (billy.File, error) {
 
 func (a *aferoFS) Chroot(path string) (billy.Filesystem, error) {
 	abs := a.abs(path)
-	if err := a.fs.MkdirAll(abs, 0755); err != nil {
+	if err := a.fs.MkdirAll(abs, 0o755); err != nil {
 		return nil, err
 	}
 	return &aferoFS{fs: a.fs, root: abs}, nil

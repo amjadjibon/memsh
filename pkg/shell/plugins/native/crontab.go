@@ -85,7 +85,7 @@ func installCrontab(fs afero.Fs, data string) error {
 	if _, err := cron.ParseCrontab(data); err != nil {
 		return fmt.Errorf("crontab: %w", err)
 	}
-	return afero.WriteFile(fs, cron.CrontabFile, []byte(data), 0644)
+	return afero.WriteFile(fs, cron.CrontabFile, []byte(data), 0o644)
 }
 
 // compile-time interface check.

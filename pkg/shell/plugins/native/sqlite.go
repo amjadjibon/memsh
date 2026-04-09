@@ -344,7 +344,7 @@ func openDB(sc plugins.ShellContext, dbPath string) (*sql.DB, func(), error) {
 		db.Close()
 		// write temp file bytes back into afero
 		if written, readErr := os.ReadFile(tmpName); readErr == nil {
-			_ = afero.WriteFile(sc.FS, absPath, written, 0644)
+			_ = afero.WriteFile(sc.FS, absPath, written, 0o644)
 		}
 		os.Remove(tmpName)
 	}

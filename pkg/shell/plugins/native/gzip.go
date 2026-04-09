@@ -34,12 +34,14 @@ func (g GzipPlugin) Name() string {
 	}
 	return "gzip"
 }
+
 func (g GzipPlugin) Description() string {
 	if g.decompress {
 		return "decompress gzip files"
 	}
 	return "compress or decompress files using gzip"
 }
+
 func (GzipPlugin) Usage() string {
 	return "gzip [-d] [-k] [-c] [-l] [-1..-9] [file...]"
 }

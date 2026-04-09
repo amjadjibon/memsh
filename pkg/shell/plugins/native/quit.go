@@ -2,6 +2,7 @@ package native
 
 import (
 	"context"
+
 	"github.com/amjadjibon/memsh/pkg/shell/plugins"
 )
 

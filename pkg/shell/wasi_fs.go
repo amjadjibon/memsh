@@ -71,7 +71,7 @@ func (a aferoSysFS) OpenFile(path string, flag experimentalsys.Oflag, perm fs.Fi
 
 	osFlags := a.oflags(flag)
 	if perm == 0 {
-		perm = 0644
+		perm = 0o644
 	}
 	f, err := a.vfs.OpenFile(afPath, osFlags, perm)
 	if err != nil {
@@ -256,9 +256,11 @@ func (d *aferoSysDirFile) Read([]byte) (int, experimentalsys.Errno) { return 0, 
 func (d *aferoSysDirFile) Pread([]byte, int64) (int, experimentalsys.Errno) {
 	return 0, experimentalsys.EISDIR
 }
+
 func (d *aferoSysDirFile) Write([]byte) (int, experimentalsys.Errno) {
 	return 0, experimentalsys.EISDIR
 }
+
 func (d *aferoSysDirFile) Pwrite([]byte, int64) (int, experimentalsys.Errno) {
 	return 0, experimentalsys.EISDIR
 }

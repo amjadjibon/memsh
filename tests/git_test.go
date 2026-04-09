@@ -82,10 +82,10 @@ func TestGit(t *testing.T) {
 	t.Run("git add and commit then log oneline", func(t *testing.T) {
 		var buf strings.Builder
 		fs := afero.NewMemMapFs()
-		if err := fs.MkdirAll("/repo", 0755); err != nil {
+		if err := fs.MkdirAll("/repo", 0o755); err != nil {
 			t.Fatal(err)
 		}
-		if err := afero.WriteFile(fs, "/repo/hello.txt", []byte("hello world\n"), 0644); err != nil {
+		if err := afero.WriteFile(fs, "/repo/hello.txt", []byte("hello world\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
 
@@ -114,10 +114,10 @@ func TestGit(t *testing.T) {
 	t.Run("git status after commit shows clean tree", func(t *testing.T) {
 		var buf strings.Builder
 		fs := afero.NewMemMapFs()
-		if err := fs.MkdirAll("/repo", 0755); err != nil {
+		if err := fs.MkdirAll("/repo", 0o755); err != nil {
 			t.Fatal(err)
 		}
-		if err := afero.WriteFile(fs, "/repo/a.txt", []byte("data\n"), 0644); err != nil {
+		if err := afero.WriteFile(fs, "/repo/a.txt", []byte("data\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
 
@@ -145,10 +145,10 @@ func TestGit(t *testing.T) {
 	t.Run("git branch creates and lists branches", func(t *testing.T) {
 		var buf strings.Builder
 		fs := afero.NewMemMapFs()
-		if err := fs.MkdirAll("/repo", 0755); err != nil {
+		if err := fs.MkdirAll("/repo", 0o755); err != nil {
 			t.Fatal(err)
 		}
-		if err := afero.WriteFile(fs, "/repo/f.txt", []byte("data\n"), 0644); err != nil {
+		if err := afero.WriteFile(fs, "/repo/f.txt", []byte("data\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
 
@@ -174,10 +174,10 @@ func TestGit(t *testing.T) {
 	t.Run("git show HEAD after commit", func(t *testing.T) {
 		var buf strings.Builder
 		fs := afero.NewMemMapFs()
-		if err := fs.MkdirAll("/repo", 0755); err != nil {
+		if err := fs.MkdirAll("/repo", 0o755); err != nil {
 			t.Fatal(err)
 		}
-		if err := afero.WriteFile(fs, "/repo/readme.md", []byte("# Hello\n"), 0644); err != nil {
+		if err := afero.WriteFile(fs, "/repo/readme.md", []byte("# Hello\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
 
@@ -211,10 +211,10 @@ func TestGit(t *testing.T) {
 	t.Run("git diff shows changes", func(t *testing.T) {
 		var buf strings.Builder
 		fs := afero.NewMemMapFs()
-		if err := fs.MkdirAll("/repo", 0755); err != nil {
+		if err := fs.MkdirAll("/repo", 0o755); err != nil {
 			t.Fatal(err)
 		}
-		if err := afero.WriteFile(fs, "/repo/data.txt", []byte("line1\nline2\n"), 0644); err != nil {
+		if err := afero.WriteFile(fs, "/repo/data.txt", []byte("line1\nline2\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
 
@@ -224,7 +224,7 @@ func TestGit(t *testing.T) {
 		run(t, s, ctx, `git -C /repo commit -m "initial"`)
 
 		// Modify the file.
-		if err := afero.WriteFile(fs, "/repo/data.txt", []byte("line1\nline2\nline3\n"), 0644); err != nil {
+		if err := afero.WriteFile(fs, "/repo/data.txt", []byte("line1\nline2\nline3\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
 

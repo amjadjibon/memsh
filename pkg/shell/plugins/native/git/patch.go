@@ -61,10 +61,10 @@ func cmdGitCherryPick(w io.Writer, errW io.Writer, fs afero.Fs, cwd string, args
 				return err
 			}
 			absPath := filepath.Join(root, f.Name)
-			if mkErr := fs.MkdirAll(filepath.Dir(absPath), 0755); mkErr != nil {
+			if mkErr := fs.MkdirAll(filepath.Dir(absPath), 0o755); mkErr != nil {
 				return mkErr
 			}
-			if err := afero.WriteFile(fs, absPath, []byte(content), 0644); err != nil {
+			if err := afero.WriteFile(fs, absPath, []byte(content), 0o644); err != nil {
 				return err
 			}
 			rel, relErr := relToRoot(root, absPath)
@@ -158,10 +158,10 @@ func applyChange(fs afero.Fs, repo *gogit.Repository, wt *gogit.Worktree, root s
 	}
 
 	absPath := filepath.Join(root, toEntry.Name)
-	if mkErr := fs.MkdirAll(filepath.Dir(absPath), 0755); mkErr != nil {
+	if mkErr := fs.MkdirAll(filepath.Dir(absPath), 0o755); mkErr != nil {
 		return mkErr
 	}
-	if err := afero.WriteFile(fs, absPath, data, 0644); err != nil {
+	if err := afero.WriteFile(fs, absPath, data, 0o644); err != nil {
 		return err
 	}
 	rel, err := relToRoot(root, absPath)
@@ -388,7 +388,7 @@ func cmdGitFormatPatch(w io.Writer, errW io.Writer, fs afero.Fs, cwd string, arg
 		// Write patch file.
 		filename := fmt.Sprintf("%04d-%s.patch", n+1, sanitizeFilename(firstLine(c.Message)))
 		absPath := filepath.Join(cwd, filename)
-		if err := afero.WriteFile(fs, absPath, buf.Bytes(), 0644); err != nil {
+		if err := afero.WriteFile(fs, absPath, buf.Bytes(), 0o644); err != nil {
 			return fmt.Errorf("git format-patch: %w", err)
 		}
 		fmt.Fprintln(w, filename)
@@ -571,10 +571,10 @@ func applyPatch(fs afero.Fs, root string, patchData []byte) ([]string, error) {
 		}
 
 		newContent := strings.Join(existingLines, "\n") + "\n"
-		if err := fs.MkdirAll(filepath.Dir(absPath), 0755); err != nil {
+		if err := fs.MkdirAll(filepath.Dir(absPath), 0o755); err != nil {
 			return nil, err
 		}
-		if err := afero.WriteFile(fs, absPath, []byte(newContent), 0644); err != nil {
+		if err := afero.WriteFile(fs, absPath, []byte(newContent), 0o644); err != nil {
 			return nil, err
 		}
 		modifiedFiles = append(modifiedFiles, absPath)

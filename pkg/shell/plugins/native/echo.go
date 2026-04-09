@@ -3,8 +3,9 @@ package native
 import (
 	"context"
 	"fmt"
-	"mvdan.cc/sh/v3/interp"
 	"strings"
+
+	"mvdan.cc/sh/v3/interp"
 )
 
 type EchoPlugin struct{}

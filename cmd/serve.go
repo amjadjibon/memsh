@@ -338,7 +338,7 @@ func runCronJob(ctx context.Context, t time.Time, command string, ss sessionSnap
 
 	existing, _ := afero.ReadFile(ss.fs, cron.CronLogFile)
 	updated := append(existing, []byte(entry)...)
-	if writeErr := afero.WriteFile(ss.fs, cron.CronLogFile, updated, 0644); writeErr != nil {
+	if writeErr := afero.WriteFile(ss.fs, cron.CronLogFile, updated, 0o644); writeErr != nil {
 		log.Printf("cron: session %s: write log: %v", ss.id, writeErr)
 	}
 }
@@ -940,8 +940,8 @@ func loadOrGenerateHostKey(keyFile string) (gliderssh.Signer, error) {
 
 	pemBlock, err := gossh.MarshalPrivateKey(priv, "memsh ssh host key")
 	if err == nil {
-		if mkErr := os.MkdirAll(filepath.Dir(keyFile), 0700); mkErr == nil {
-			_ = os.WriteFile(keyFile, pem.EncodeToMemory(pemBlock), 0600)
+		if mkErr := os.MkdirAll(filepath.Dir(keyFile), 0o700); mkErr == nil {
+			_ = os.WriteFile(keyFile, pem.EncodeToMemory(pemBlock), 0o600)
 			log.Printf("memsh serve: SSH: host key saved to %s", keyFile)
 		}
 	}

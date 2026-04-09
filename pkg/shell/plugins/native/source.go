@@ -3,6 +3,7 @@ package native
 import (
 	"context"
 	"fmt"
+
 	"github.com/amjadjibon/memsh/pkg/shell/plugins"
 )
 
