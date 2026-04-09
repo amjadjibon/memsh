@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/amjadjibon/memsh/shell"
+	"github.com/amjadjibon/memsh/pkg/shell"
 	"github.com/spf13/afero"
 )
 

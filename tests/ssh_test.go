@@ -15,7 +15,7 @@ import (
 	"github.com/spf13/afero"
 	gossh "golang.org/x/crypto/ssh"
 
-	"github.com/amjadjibon/memsh/shell"
+	"github.com/amjadjibon/memsh/pkg/shell"
 )
 
 // startTestSSHServer starts an in-process memsh SSH server on a random port.

@@ -11,7 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/amjadjibon/memsh/shell"
+	"github.com/amjadjibon/memsh/pkg/shell"
 )
 
 var pluginCmd = &cobra.Command{

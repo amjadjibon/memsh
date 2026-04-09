@@ -9,7 +9,7 @@ import (
 
 	"github.com/spf13/afero"
 
-	"github.com/amjadjibon/memsh/shell"
+	"github.com/amjadjibon/memsh/pkg/shell"
 )
 
 // newCurlTestServer returns a test HTTP server with a few endpoints:

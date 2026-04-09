@@ -8,7 +8,7 @@ import (
 
 	"github.com/spf13/afero"
 
-	"github.com/amjadjibon/memsh/shell"
+	"github.com/amjadjibon/memsh/pkg/shell"
 )
 
 // gitShell creates a test shell paired with a pre-seeded afero.MemMapFs.

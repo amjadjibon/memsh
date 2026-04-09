@@ -8,8 +8,8 @@ import (
 
 	"github.com/spf13/afero"
 
-	"github.com/amjadjibon/memsh/shell"
-	"github.com/amjadjibon/memsh/shell/plugins/native"
+	"github.com/amjadjibon/memsh/pkg/shell"
+	"github.com/amjadjibon/memsh/pkg/shell/plugins/native"
 )
 
 // parsePagerOutput splits the pager sentinel output into metadata+content.

@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/amjadjibon/memsh/pkg/shell"
 	"github.com/spf13/afero"
-	"github.com/amjadjibon/memsh/shell"
 )
 
 func TestAwk(t *testing.T) {
