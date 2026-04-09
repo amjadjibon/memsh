@@ -3,9 +3,10 @@ package native
 import (
 	"context"
 	"fmt"
+	"sort"
+
 	"github.com/amjadjibon/memsh/pkg/shell/plugins"
 	"mvdan.cc/sh/v3/interp"
-	"sort"
 )
 
 type EnvPlugin struct{}

@@ -3,10 +3,11 @@ package native
 import (
 	"context"
 	"fmt"
-	"github.com/amjadjibon/memsh/pkg/shell/plugins"
-	"mvdan.cc/sh/v3/interp"
 	"os"
 	"strconv"
+
+	"github.com/amjadjibon/memsh/pkg/shell/plugins"
+	"mvdan.cc/sh/v3/interp"
 )
 
 type MkdirPlugin struct{}
@@ -20,7 +21,7 @@ func runMkdir(ctx context.Context, args []string) error {
 	hc := interp.HandlerCtx(ctx)
 	sc := plugins.ShellCtx(ctx)
 	verbose := false
-	var perm os.FileMode = 0755
+	var perm os.FileMode = 0o755
 	var dirs []string
 	for i := 1; i < len(args); i++ {
 		a := args[i]

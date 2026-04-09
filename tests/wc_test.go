@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/spf13/afero"
 	"github.com/amjadjibon/memsh/pkg/shell"
+	"github.com/spf13/afero"
 )
 
 func TestWc(t *testing.T) {
@@ -26,7 +26,7 @@ func TestWc(t *testing.T) {
 
 	t.Run("wc -l counts lines from virtual FS file", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		afero.WriteFile(fs, "/lines.txt", []byte("a\nb\nc\n"), 0644)
+		afero.WriteFile(fs, "/lines.txt", []byte("a\nb\nc\n"), 0o644)
 		var buf strings.Builder
 		s := NewTestShell(t, &buf, shell.WithFS(fs))
 
@@ -65,8 +65,8 @@ func TestWc(t *testing.T) {
 
 	t.Run("wc handles multiple files", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		afero.WriteFile(fs, "/a.txt", []byte("line1\nline2\n"), 0644)
-		afero.WriteFile(fs, "/b.txt", []byte("single"), 0644)
+		afero.WriteFile(fs, "/a.txt", []byte("line1\nline2\n"), 0o644)
+		afero.WriteFile(fs, "/b.txt", []byte("single"), 0o644)
 		var buf strings.Builder
 		s := NewTestShell(t, &buf, shell.WithFS(fs))
 

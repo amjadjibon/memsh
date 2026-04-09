@@ -11,13 +11,13 @@ import (
 func makeCompletionFS(t *testing.T) afero.Fs {
 	t.Helper()
 	fs := afero.NewMemMapFs()
-	_ = fs.MkdirAll("/etc", 0755)
-	_ = fs.MkdirAll("/home/user", 0755)
-	_ = fs.MkdirAll("/usr/bin", 0755)
-	_ = afero.WriteFile(fs, "/etc/hosts", []byte("127.0.0.1 localhost\n"), 0644)
-	_ = afero.WriteFile(fs, "/etc/passwd", []byte("root:x:0:0\n"), 0644)
-	_ = afero.WriteFile(fs, "/home/user/notes.txt", []byte("hello\n"), 0644)
-	_ = afero.WriteFile(fs, "/hello.sh", []byte("echo hi\n"), 0755)
+	_ = fs.MkdirAll("/etc", 0o755)
+	_ = fs.MkdirAll("/home/user", 0o755)
+	_ = fs.MkdirAll("/usr/bin", 0o755)
+	_ = afero.WriteFile(fs, "/etc/hosts", []byte("127.0.0.1 localhost\n"), 0o644)
+	_ = afero.WriteFile(fs, "/etc/passwd", []byte("root:x:0:0\n"), 0o644)
+	_ = afero.WriteFile(fs, "/home/user/notes.txt", []byte("hello\n"), 0o644)
+	_ = afero.WriteFile(fs, "/hello.sh", []byte("echo hi\n"), 0o755)
 	return fs
 }
 

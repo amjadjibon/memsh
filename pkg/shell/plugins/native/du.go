@@ -3,10 +3,11 @@ package native
 import (
 	"context"
 	"fmt"
+	"os"
+
 	"github.com/amjadjibon/memsh/pkg/shell/plugins"
 	"github.com/spf13/afero"
 	"mvdan.cc/sh/v3/interp"
-	"os"
 )
 
 type DuPlugin struct{}

@@ -79,7 +79,7 @@ func TestJq(t *testing.T) {
 
 	t.Run("jq reads from virtual FS file", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		afero.WriteFile(fs, "/data.json", []byte(`{"msg":"hello"}`), 0644)
+		afero.WriteFile(fs, "/data.json", []byte(`{"msg":"hello"}`), 0o644)
 		var buf strings.Builder
 		s := NewTestShell(t, &buf, shell.WithFS(fs))
 		if err := s.Run(ctx, `jq -r .msg /data.json`); err != nil {

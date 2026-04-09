@@ -3,11 +3,12 @@ package native
 import (
 	"context"
 	"fmt"
-	"github.com/amjadjibon/memsh/pkg/shell/plugins"
-	"mvdan.cc/sh/v3/interp"
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/amjadjibon/memsh/pkg/shell/plugins"
+	"mvdan.cc/sh/v3/interp"
 )
 
 type LsPlugin struct{}

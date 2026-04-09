@@ -40,15 +40,15 @@ func TestParseCronExpr(t *testing.T) {
 
 func TestParseCronExprInvalid(t *testing.T) {
 	cases := []string{
-		"60 * * * *",      // minute out of range
-		"* 24 * * *",      // hour out of range
-		"* * 0 * *",       // dom out of range (min is 1)
-		"* * * 13 *",      // month out of range
-		"* * * * *",       // valid — sanity; not in this list
-		"* * * *",         // too few fields
-		"* * * * * *",     // too many fields
-		"*/0 * * * *",     // step of zero
-		"abc * * * *",     // non-numeric
+		"60 * * * *",  // minute out of range
+		"* 24 * * *",  // hour out of range
+		"* * 0 * *",   // dom out of range (min is 1)
+		"* * * 13 *",  // month out of range
+		"* * * * *",   // valid — sanity; not in this list
+		"* * * *",     // too few fields
+		"* * * * * *", // too many fields
+		"*/0 * * * *", // step of zero
+		"abc * * * *", // non-numeric
 	}
 	// Remove the valid one to avoid a false failure.
 	for i, s := range cases {

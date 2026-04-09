@@ -66,7 +66,7 @@ func TestYq(t *testing.T) {
 
 	t.Run("yq reads from virtual FS file", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		afero.WriteFile(fs, "/config.yaml", []byte("host: localhost\nport: 8080\n"), 0644)
+		afero.WriteFile(fs, "/config.yaml", []byte("host: localhost\nport: 8080\n"), 0o644)
 		var buf strings.Builder
 		s := NewTestShell(t, &buf, shell.WithFS(fs))
 		if err := s.Run(ctx, `yq .host /config.yaml`); err != nil {

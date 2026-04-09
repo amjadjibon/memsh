@@ -15,8 +15,8 @@ func TestTar(t *testing.T) {
 
 	// seed helpers
 	seedFiles := func(fs afero.Fs) {
-		afero.WriteFile(fs, "/src/a.txt", []byte("hello"), 0644)
-		afero.WriteFile(fs, "/src/b.txt", []byte("world"), 0644)
+		afero.WriteFile(fs, "/src/a.txt", []byte("hello"), 0o644)
+		afero.WriteFile(fs, "/src/b.txt", []byte("world"), 0o644)
 	}
 
 	t.Run("create and list tar", func(t *testing.T) {
@@ -47,7 +47,7 @@ func TestTar(t *testing.T) {
 		if err := s.Run(ctx, "tar -cf /arch.tar /src/a.txt /src/b.txt"); err != nil {
 			t.Fatalf("create: %v", err)
 		}
-		fs.MkdirAll("/dest", 0755)
+		fs.MkdirAll("/dest", 0o755)
 		if err := s.Run(ctx, "tar -xf /arch.tar -C /dest"); err != nil {
 			t.Fatalf("extract: %v", err)
 		}
@@ -69,7 +69,7 @@ func TestTar(t *testing.T) {
 		if err := s.Run(ctx, "tar -czf /arch.tar.gz /src/a.txt /src/b.txt"); err != nil {
 			t.Fatalf("create gz: %v", err)
 		}
-		fs.MkdirAll("/dest2", 0755)
+		fs.MkdirAll("/dest2", 0o755)
 		if err := s.Run(ctx, "tar -xzf /arch.tar.gz -C /dest2"); err != nil {
 			t.Fatalf("extract gz: %v", err)
 		}
@@ -121,7 +121,7 @@ func TestGzip(t *testing.T) {
 
 	t.Run("compress file", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		afero.WriteFile(fs, "/hello.txt", []byte("hello gzip"), 0644)
+		afero.WriteFile(fs, "/hello.txt", []byte("hello gzip"), 0o644)
 		var buf strings.Builder
 		s := NewTestShell(t, &buf, shell.WithFS(fs))
 
@@ -138,7 +138,7 @@ func TestGzip(t *testing.T) {
 
 	t.Run("compress -k keeps original", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		afero.WriteFile(fs, "/data.txt", []byte("keep me"), 0644)
+		afero.WriteFile(fs, "/data.txt", []byte("keep me"), 0o644)
 		var buf strings.Builder
 		s := NewTestShell(t, &buf, shell.WithFS(fs))
 
@@ -155,7 +155,7 @@ func TestGzip(t *testing.T) {
 
 	t.Run("decompress with gzip -d", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		afero.WriteFile(fs, "/msg.txt", []byte("round trip"), 0644)
+		afero.WriteFile(fs, "/msg.txt", []byte("round trip"), 0o644)
 		var buf strings.Builder
 		s := NewTestShell(t, &buf, shell.WithFS(fs))
 
@@ -173,7 +173,7 @@ func TestGzip(t *testing.T) {
 
 	t.Run("gunzip alias", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		afero.WriteFile(fs, "/alias.txt", []byte("gunzip test"), 0644)
+		afero.WriteFile(fs, "/alias.txt", []byte("gunzip test"), 0o644)
 		var buf strings.Builder
 		s := NewTestShell(t, &buf, shell.WithFS(fs))
 
@@ -188,7 +188,7 @@ func TestGzip(t *testing.T) {
 
 	t.Run("gzip -c writes to stdout", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		afero.WriteFile(fs, "/pipe.txt", []byte("pipe content"), 0644)
+		afero.WriteFile(fs, "/pipe.txt", []byte("pipe content"), 0o644)
 		var buf strings.Builder
 		s := NewTestShell(t, &buf, shell.WithFS(fs))
 
@@ -206,7 +206,7 @@ func TestGzip(t *testing.T) {
 
 	t.Run("stdin to stdout", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		afero.WriteFile(fs, "/in.txt", []byte("stdin data"), 0644)
+		afero.WriteFile(fs, "/in.txt", []byte("stdin data"), 0o644)
 		var buf strings.Builder
 		s := NewTestShell(t, &buf, shell.WithFS(fs))
 
@@ -224,8 +224,8 @@ func TestZip(t *testing.T) {
 
 	t.Run("create and list zip", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		afero.WriteFile(fs, "/a.txt", []byte("aaa"), 0644)
-		afero.WriteFile(fs, "/b.txt", []byte("bbb"), 0644)
+		afero.WriteFile(fs, "/a.txt", []byte("aaa"), 0o644)
+		afero.WriteFile(fs, "/b.txt", []byte("bbb"), 0o644)
 		var buf strings.Builder
 		s := NewTestShell(t, &buf, shell.WithFS(fs))
 
@@ -244,14 +244,14 @@ func TestZip(t *testing.T) {
 
 	t.Run("extract zip", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		afero.WriteFile(fs, "/src.txt", []byte("zip content"), 0644)
+		afero.WriteFile(fs, "/src.txt", []byte("zip content"), 0o644)
 		var buf strings.Builder
 		s := NewTestShell(t, &buf, shell.WithFS(fs))
 
 		if err := s.Run(ctx, "zip /arch.zip /src.txt"); err != nil {
 			t.Fatalf("zip: %v", err)
 		}
-		fs.MkdirAll("/out", 0755)
+		fs.MkdirAll("/out", 0o755)
 		if err := s.Run(ctx, "unzip -d /out /arch.zip"); err != nil {
 			t.Fatalf("unzip: %v", err)
 		}
@@ -266,9 +266,9 @@ func TestZip(t *testing.T) {
 
 	t.Run("zip -r adds directory recursively", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		fs.MkdirAll("/dir", 0755)
-		afero.WriteFile(fs, "/dir/x.txt", []byte("x"), 0644)
-		afero.WriteFile(fs, "/dir/y.txt", []byte("y"), 0644)
+		fs.MkdirAll("/dir", 0o755)
+		afero.WriteFile(fs, "/dir/x.txt", []byte("x"), 0o644)
+		afero.WriteFile(fs, "/dir/y.txt", []byte("y"), 0o644)
 		var buf strings.Builder
 		s := NewTestShell(t, &buf, shell.WithFS(fs))
 
@@ -287,7 +287,7 @@ func TestZip(t *testing.T) {
 
 	t.Run("unzip extracts to cwd by default", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		afero.WriteFile(fs, "/f.txt", []byte("cwd extract"), 0644)
+		afero.WriteFile(fs, "/f.txt", []byte("cwd extract"), 0o644)
 		var buf strings.Builder
 		s := NewTestShell(t, &buf, shell.WithFS(fs))
 

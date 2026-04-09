@@ -18,7 +18,7 @@ func TestXxd(t *testing.T) {
 
 	t.Run("default dump has offset hex and ASCII", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		afero.WriteFile(fs, "/f.bin", content, 0644)
+		afero.WriteFile(fs, "/f.bin", content, 0o644)
 		var buf strings.Builder
 		s := NewTestShell(t, &buf, shell.WithFS(fs))
 		if err := s.Run(ctx, "xxd /f.bin"); err != nil {
@@ -38,7 +38,7 @@ func TestXxd(t *testing.T) {
 
 	t.Run("-p plain hex output", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		afero.WriteFile(fs, "/f.bin", content, 0644)
+		afero.WriteFile(fs, "/f.bin", content, 0o644)
 		var buf strings.Builder
 		s := NewTestShell(t, &buf, shell.WithFS(fs))
 		if err := s.Run(ctx, "xxd -p /f.bin"); err != nil {
@@ -56,7 +56,7 @@ func TestXxd(t *testing.T) {
 
 	t.Run("-u uppercase hex", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		afero.WriteFile(fs, "/f.bin", content, 0644)
+		afero.WriteFile(fs, "/f.bin", content, 0o644)
 		var buf strings.Builder
 		s := NewTestShell(t, &buf, shell.WithFS(fs))
 		if err := s.Run(ctx, "xxd -u /f.bin"); err != nil {
@@ -70,7 +70,7 @@ func TestXxd(t *testing.T) {
 
 	t.Run("-l limits bytes", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		afero.WriteFile(fs, "/f.bin", content, 0644)
+		afero.WriteFile(fs, "/f.bin", content, 0o644)
 		var buf strings.Builder
 		s := NewTestShell(t, &buf, shell.WithFS(fs))
 		if err := s.Run(ctx, "xxd -l 4 /f.bin"); err != nil {
@@ -88,7 +88,7 @@ func TestXxd(t *testing.T) {
 
 	t.Run("-s skips bytes", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		afero.WriteFile(fs, "/f.bin", content, 0644)
+		afero.WriteFile(fs, "/f.bin", content, 0o644)
 		var buf strings.Builder
 		s := NewTestShell(t, &buf, shell.WithFS(fs))
 		if err := s.Run(ctx, "xxd -s 7 /f.bin"); err != nil {
@@ -103,7 +103,7 @@ func TestXxd(t *testing.T) {
 
 	t.Run("-c sets columns", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		afero.WriteFile(fs, "/f.bin", content, 0644)
+		afero.WriteFile(fs, "/f.bin", content, 0o644)
 		var buf strings.Builder
 		s := NewTestShell(t, &buf, shell.WithFS(fs))
 		if err := s.Run(ctx, "xxd -c 4 /f.bin"); err != nil {
@@ -119,7 +119,7 @@ func TestXxd(t *testing.T) {
 	t.Run("-r reverse hex to binary", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
 		// create a plain hex file and reverse it
-		afero.WriteFile(fs, "/hex.txt", []byte("48656c6c6f"), 0644)
+		afero.WriteFile(fs, "/hex.txt", []byte("48656c6c6f"), 0o644)
 		var buf strings.Builder
 		s := NewTestShell(t, &buf, shell.WithFS(fs))
 		if err := s.Run(ctx, "xxd -r -p /hex.txt"); err != nil {
@@ -132,7 +132,7 @@ func TestXxd(t *testing.T) {
 
 	t.Run("round-trip: xxd -p then xxd -r -p", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		afero.WriteFile(fs, "/orig.bin", content, 0644)
+		afero.WriteFile(fs, "/orig.bin", content, 0o644)
 		var buf strings.Builder
 		s := NewTestShell(t, &buf, shell.WithFS(fs))
 		if err := s.Run(ctx, "xxd -p /orig.bin > /hex.txt && xxd -r -p /hex.txt"); err != nil {
@@ -145,7 +145,7 @@ func TestXxd(t *testing.T) {
 
 	t.Run("stdin input", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		afero.WriteFile(fs, "/in.txt", []byte("hi"), 0644)
+		afero.WriteFile(fs, "/in.txt", []byte("hi"), 0o644)
 		var buf strings.Builder
 		s := NewTestShell(t, &buf, shell.WithFS(fs))
 		if err := s.Run(ctx, "cat /in.txt | xxd -p"); err != nil {
@@ -158,7 +158,7 @@ func TestXxd(t *testing.T) {
 
 	t.Run("-b binary bit dump", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		afero.WriteFile(fs, "/f.bin", []byte{0xFF, 0x00}, 0644)
+		afero.WriteFile(fs, "/f.bin", []byte{0xFF, 0x00}, 0o644)
 		var buf strings.Builder
 		s := NewTestShell(t, &buf, shell.WithFS(fs))
 		if err := s.Run(ctx, "xxd -b /f.bin"); err != nil {
@@ -181,7 +181,7 @@ func TestHexdump(t *testing.T) {
 
 	t.Run("-C canonical output has offset hex and ASCII", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		afero.WriteFile(fs, "/f.bin", content, 0644)
+		afero.WriteFile(fs, "/f.bin", content, 0o644)
 		var buf strings.Builder
 		s := NewTestShell(t, &buf, shell.WithFS(fs))
 		if err := s.Run(ctx, "hexdump -C /f.bin"); err != nil {
@@ -201,7 +201,7 @@ func TestHexdump(t *testing.T) {
 
 	t.Run("default two-word output", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		afero.WriteFile(fs, "/f.bin", content, 0644)
+		afero.WriteFile(fs, "/f.bin", content, 0o644)
 		var buf strings.Builder
 		s := NewTestShell(t, &buf, shell.WithFS(fs))
 		if err := s.Run(ctx, "hexdump /f.bin"); err != nil {
@@ -216,7 +216,7 @@ func TestHexdump(t *testing.T) {
 
 	t.Run("-n limits bytes", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		afero.WriteFile(fs, "/f.bin", content, 0644)
+		afero.WriteFile(fs, "/f.bin", content, 0o644)
 		var buf strings.Builder
 		s := NewTestShell(t, &buf, shell.WithFS(fs))
 		if err := s.Run(ctx, "hexdump -C -n 5 /f.bin"); err != nil {
@@ -233,7 +233,7 @@ func TestHexdump(t *testing.T) {
 
 	t.Run("-s skips bytes", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		afero.WriteFile(fs, "/f.bin", content, 0644)
+		afero.WriteFile(fs, "/f.bin", content, 0o644)
 		var buf strings.Builder
 		s := NewTestShell(t, &buf, shell.WithFS(fs))
 		if err := s.Run(ctx, "hexdump -C -s 7 /f.bin"); err != nil {
@@ -248,7 +248,7 @@ func TestHexdump(t *testing.T) {
 	t.Run("duplicate rows collapsed with *", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
 		// 48 bytes of zeros → multiple identical 16-byte rows
-		afero.WriteFile(fs, "/zeros.bin", make([]byte, 48), 0644)
+		afero.WriteFile(fs, "/zeros.bin", make([]byte, 48), 0o644)
 		var buf strings.Builder
 		s := NewTestShell(t, &buf, shell.WithFS(fs))
 		if err := s.Run(ctx, "hexdump -C /zeros.bin"); err != nil {
@@ -262,7 +262,7 @@ func TestHexdump(t *testing.T) {
 
 	t.Run("-v disables collapse", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		afero.WriteFile(fs, "/zeros.bin", make([]byte, 48), 0644)
+		afero.WriteFile(fs, "/zeros.bin", make([]byte, 48), 0o644)
 		var buf strings.Builder
 		s := NewTestShell(t, &buf, shell.WithFS(fs))
 		if err := s.Run(ctx, "hexdump -C -v /zeros.bin"); err != nil {
@@ -277,7 +277,7 @@ func TestHexdump(t *testing.T) {
 
 	t.Run("stdin input", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		afero.WriteFile(fs, "/in.txt", []byte("AB"), 0644)
+		afero.WriteFile(fs, "/in.txt", []byte("AB"), 0o644)
 		var buf strings.Builder
 		s := NewTestShell(t, &buf, shell.WithFS(fs))
 		if err := s.Run(ctx, "cat /in.txt | hexdump -C"); err != nil {

@@ -86,9 +86,9 @@ func TestBuiltins(t *testing.T) {
 		{
 			name: "ls pre-seeded directory lists files",
 			setup: func(fs afero.Fs) {
-				fs.MkdirAll("/seeddir", 0755)
-				afero.WriteFile(fs, "/seeddir/alpha.txt", []byte("a"), 0644)
-				afero.WriteFile(fs, "/seeddir/beta.txt", []byte("b"), 0644)
+				fs.MkdirAll("/seeddir", 0o755)
+				afero.WriteFile(fs, "/seeddir/alpha.txt", []byte("a"), 0o644)
+				afero.WriteFile(fs, "/seeddir/beta.txt", []byte("b"), 0o644)
 			},
 			script:  "ls /seeddir",
 			wantOut: "alpha.txt",
@@ -96,7 +96,7 @@ func TestBuiltins(t *testing.T) {
 		{
 			name: "ls single file prints filename",
 			setup: func(fs afero.Fs) {
-				afero.WriteFile(fs, "/solo.txt", []byte("x"), 0644)
+				afero.WriteFile(fs, "/solo.txt", []byte("x"), 0o644)
 			},
 			script:  "ls /solo.txt",
 			wantOut: "solo.txt",
@@ -105,7 +105,7 @@ func TestBuiltins(t *testing.T) {
 		{
 			name: "cat prints pre-seeded file content",
 			setup: func(fs afero.Fs) {
-				afero.WriteFile(fs, "/hello.txt", []byte("hello world"), 0644)
+				afero.WriteFile(fs, "/hello.txt", []byte("hello world"), 0o644)
 			},
 			script:  "cat /hello.txt",
 			wantOut: "hello world",
@@ -128,7 +128,7 @@ func TestBuiltins(t *testing.T) {
 		{
 			name: "touch on existing file does not error",
 			setup: func(fs afero.Fs) {
-				afero.WriteFile(fs, "/existing.txt", []byte("data"), 0644)
+				afero.WriteFile(fs, "/existing.txt", []byte("data"), 0o644)
 			},
 			script: "touch /existing.txt",
 		},
@@ -136,7 +136,7 @@ func TestBuiltins(t *testing.T) {
 		{
 			name: "rm removes a file",
 			setup: func(fs afero.Fs) {
-				afero.WriteFile(fs, "/todelete.txt", []byte("bye"), 0644)
+				afero.WriteFile(fs, "/todelete.txt", []byte("bye"), 0o644)
 			},
 			script: "rm /todelete.txt",
 		},
@@ -213,7 +213,7 @@ func TestRedirects(t *testing.T) {
 
 	t.Run("append redirect appends to existing file", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		afero.WriteFile(fs, "/f", []byte("foo\n"), 0644)
+		afero.WriteFile(fs, "/f", []byte("foo\n"), 0o644)
 
 		var buf bytes.Buffer
 		s := newTestShell(t, &buf, shell.WithFS(fs))
@@ -237,7 +237,7 @@ func TestRedirects(t *testing.T) {
 
 	t.Run("overwrite redirect truncates existing content", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		afero.WriteFile(fs, "/f", []byte("old content\n"), 0644)
+		afero.WriteFile(fs, "/f", []byte("old content\n"), 0o644)
 
 		var buf bytes.Buffer
 		s := newTestShell(t, &buf, shell.WithFS(fs))
@@ -386,7 +386,7 @@ func TestWithFS(t *testing.T) {
 
 	t.Run("cat reads pre-seeded file content", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		afero.WriteFile(fs, "/data.txt", []byte("seeded content"), 0644)
+		afero.WriteFile(fs, "/data.txt", []byte("seeded content"), 0o644)
 
 		var buf bytes.Buffer
 		s := newTestShell(t, &buf, shell.WithFS(fs))
@@ -401,9 +401,9 @@ func TestWithFS(t *testing.T) {
 
 	t.Run("ls shows pre-seeded files in directory", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		fs.MkdirAll("/predir", 0755)
-		afero.WriteFile(fs, "/predir/fileA", []byte(""), 0644)
-		afero.WriteFile(fs, "/predir/fileB", []byte(""), 0644)
+		fs.MkdirAll("/predir", 0o755)
+		afero.WriteFile(fs, "/predir/fileA", []byte(""), 0o644)
+		afero.WriteFile(fs, "/predir/fileB", []byte(""), 0o644)
 
 		var buf bytes.Buffer
 		s := newTestShell(t, &buf, shell.WithFS(fs))
@@ -422,7 +422,7 @@ func TestWithFS(t *testing.T) {
 
 	t.Run("rm removes pre-seeded file", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		afero.WriteFile(fs, "/gone.txt", []byte("bye"), 0644)
+		afero.WriteFile(fs, "/gone.txt", []byte("bye"), 0o644)
 
 		var buf bytes.Buffer
 		s := newTestShell(t, &buf, shell.WithFS(fs))
@@ -472,7 +472,7 @@ func TestWithCwd(t *testing.T) {
 
 		// Mirror the real dir path in the virtual FS so ls/touch work.
 		fs := afero.NewMemMapFs()
-		fs.MkdirAll(dir, 0755)
+		fs.MkdirAll(dir, 0o755)
 
 		var buf bytes.Buffer
 		s := newTestShell(t, &buf, shell.WithFS(fs), shell.WithCwd(dir))
@@ -490,8 +490,8 @@ func TestWithCwd(t *testing.T) {
 		dir := realTmpDir(t)
 
 		fs := afero.NewMemMapFs()
-		fs.MkdirAll(dir, 0755)
-		afero.WriteFile(fs, dir+"/myfile.txt", []byte("hi"), 0644)
+		fs.MkdirAll(dir, 0o755)
+		afero.WriteFile(fs, dir+"/myfile.txt", []byte("hi"), 0o644)
 
 		var buf bytes.Buffer
 		s := newTestShell(t, &buf, shell.WithFS(fs), shell.WithCwd(dir))
@@ -509,7 +509,7 @@ func TestWithCwd(t *testing.T) {
 		dir := realTmpDir(t)
 
 		fs := afero.NewMemMapFs()
-		fs.MkdirAll(dir, 0755)
+		fs.MkdirAll(dir, 0o755)
 
 		var buf bytes.Buffer
 		s := newTestShell(t, &buf, shell.WithFS(fs), shell.WithCwd(dir))
@@ -528,8 +528,8 @@ func TestWithCwd(t *testing.T) {
 		dir := realTmpDir(t)
 
 		fs := afero.NewMemMapFs()
-		fs.MkdirAll(dir, 0755)
-		afero.WriteFile(fs, dir+"/greet.txt", []byte("greetings"), 0644)
+		fs.MkdirAll(dir, 0o755)
+		afero.WriteFile(fs, dir+"/greet.txt", []byte("greetings"), 0o644)
 
 		var buf bytes.Buffer
 		s := newTestShell(t, &buf, shell.WithFS(fs), shell.WithCwd(dir))
@@ -686,7 +686,7 @@ func TestCpMv(t *testing.T) {
 
 	t.Run("cp copies file content", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		afero.WriteFile(fs, "/src.txt", []byte("hello"), 0644)
+		afero.WriteFile(fs, "/src.txt", []byte("hello"), 0o644)
 		var buf bytes.Buffer
 		s := newTestShell(t, &buf, shell.WithFS(fs))
 
@@ -704,8 +704,8 @@ func TestCpMv(t *testing.T) {
 
 	t.Run("cp into existing directory places file inside", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		afero.WriteFile(fs, "/f.txt", []byte("data"), 0644)
-		fs.MkdirAll("/dir", 0755)
+		afero.WriteFile(fs, "/f.txt", []byte("data"), 0o644)
+		fs.MkdirAll("/dir", 0o755)
 		var buf bytes.Buffer
 		s := newTestShell(t, &buf, shell.WithFS(fs))
 
@@ -720,9 +720,9 @@ func TestCpMv(t *testing.T) {
 
 	t.Run("cp -r copies directory recursively", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		fs.MkdirAll("/a", 0755)
-		afero.WriteFile(fs, "/a/x.txt", []byte("x"), 0644)
-		afero.WriteFile(fs, "/a/y.txt", []byte("y"), 0644)
+		fs.MkdirAll("/a", 0o755)
+		afero.WriteFile(fs, "/a/x.txt", []byte("x"), 0o644)
+		afero.WriteFile(fs, "/a/y.txt", []byte("y"), 0o644)
 		var buf bytes.Buffer
 		s := newTestShell(t, &buf, shell.WithFS(fs))
 
@@ -740,7 +740,7 @@ func TestCpMv(t *testing.T) {
 
 	t.Run("cp directory without -r returns error", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		fs.MkdirAll("/mydir", 0755)
+		fs.MkdirAll("/mydir", 0o755)
 		var buf bytes.Buffer
 		s := newTestShell(t, &buf, shell.WithFS(fs))
 
@@ -763,7 +763,7 @@ func TestCpMv(t *testing.T) {
 
 	t.Run("mv renames file", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		afero.WriteFile(fs, "/old.txt", []byte("content"), 0644)
+		afero.WriteFile(fs, "/old.txt", []byte("content"), 0o644)
 		var buf bytes.Buffer
 		s := newTestShell(t, &buf, shell.WithFS(fs))
 
@@ -785,8 +785,8 @@ func TestCpMv(t *testing.T) {
 
 	t.Run("mv into existing directory moves file inside", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		afero.WriteFile(fs, "/f.txt", []byte("hi"), 0644)
-		fs.MkdirAll("/dir", 0755)
+		afero.WriteFile(fs, "/f.txt", []byte("hi"), 0o644)
+		fs.MkdirAll("/dir", 0o755)
 		var buf bytes.Buffer
 		s := newTestShell(t, &buf, shell.WithFS(fs))
 
@@ -810,7 +810,7 @@ func TestHeadTail(t *testing.T) {
 
 	t.Run("head prints first 10 lines by default", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		afero.WriteFile(fs, "/f.txt", []byte(content), 0644)
+		afero.WriteFile(fs, "/f.txt", []byte(content), 0o644)
 		var buf bytes.Buffer
 		s := newTestShell(t, &buf, shell.WithFS(fs))
 
@@ -824,7 +824,7 @@ func TestHeadTail(t *testing.T) {
 
 	t.Run("head -n 2 prints first 2 lines", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		afero.WriteFile(fs, "/f.txt", []byte(content), 0644)
+		afero.WriteFile(fs, "/f.txt", []byte(content), 0o644)
 		var buf bytes.Buffer
 		s := newTestShell(t, &buf, shell.WithFS(fs))
 
@@ -842,7 +842,7 @@ func TestHeadTail(t *testing.T) {
 
 	t.Run("tail -n 2 prints last 2 lines", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		afero.WriteFile(fs, "/f.txt", []byte(content), 0644)
+		afero.WriteFile(fs, "/f.txt", []byte(content), 0o644)
 		var buf bytes.Buffer
 		s := newTestShell(t, &buf, shell.WithFS(fs))
 
@@ -860,7 +860,7 @@ func TestHeadTail(t *testing.T) {
 
 	t.Run("tail prints last 10 lines by default", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		afero.WriteFile(fs, "/f.txt", []byte(content), 0644)
+		afero.WriteFile(fs, "/f.txt", []byte(content), 0o644)
 		var buf bytes.Buffer
 		s := newTestShell(t, &buf, shell.WithFS(fs))
 
@@ -893,7 +893,7 @@ func TestGrep(t *testing.T) {
 
 	t.Run("grep matches lines in file", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		afero.WriteFile(fs, "/f.txt", []byte("apple\nbanana\napricot\n"), 0644)
+		afero.WriteFile(fs, "/f.txt", []byte("apple\nbanana\napricot\n"), 0o644)
 		var buf bytes.Buffer
 		s := newTestShell(t, &buf, shell.WithFS(fs))
 
@@ -911,7 +911,7 @@ func TestGrep(t *testing.T) {
 
 	t.Run("grep -i does case-insensitive match", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		afero.WriteFile(fs, "/f.txt", []byte("Hello\nworld\n"), 0644)
+		afero.WriteFile(fs, "/f.txt", []byte("Hello\nworld\n"), 0o644)
 		var buf bytes.Buffer
 		s := newTestShell(t, &buf, shell.WithFS(fs))
 
@@ -925,7 +925,7 @@ func TestGrep(t *testing.T) {
 
 	t.Run("grep -v inverts match", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		afero.WriteFile(fs, "/f.txt", []byte("keep\nskip\nkeep2\n"), 0644)
+		afero.WriteFile(fs, "/f.txt", []byte("keep\nskip\nkeep2\n"), 0o644)
 		var buf bytes.Buffer
 		s := newTestShell(t, &buf, shell.WithFS(fs))
 
@@ -943,7 +943,7 @@ func TestGrep(t *testing.T) {
 
 	t.Run("grep -n shows line numbers", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		afero.WriteFile(fs, "/f.txt", []byte("foo\nbar\nfoo2\n"), 0644)
+		afero.WriteFile(fs, "/f.txt", []byte("foo\nbar\nfoo2\n"), 0o644)
 		var buf bytes.Buffer
 		s := newTestShell(t, &buf, shell.WithFS(fs))
 
@@ -958,7 +958,7 @@ func TestGrep(t *testing.T) {
 
 	t.Run("grep no match returns non-nil error", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		afero.WriteFile(fs, "/f.txt", []byte("hello\n"), 0644)
+		afero.WriteFile(fs, "/f.txt", []byte("hello\n"), 0o644)
 		var buf bytes.Buffer
 		s := newTestShell(t, &buf, shell.WithFS(fs))
 
@@ -987,9 +987,9 @@ func TestFind(t *testing.T) {
 
 	t.Run("find lists all entries under path", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		fs.MkdirAll("/d", 0755)
-		afero.WriteFile(fs, "/d/a.txt", []byte(""), 0644)
-		afero.WriteFile(fs, "/d/b.go", []byte(""), 0644)
+		fs.MkdirAll("/d", 0o755)
+		afero.WriteFile(fs, "/d/a.txt", []byte(""), 0o644)
+		afero.WriteFile(fs, "/d/b.go", []byte(""), 0o644)
 		var buf bytes.Buffer
 		s := newTestShell(t, &buf, shell.WithFS(fs))
 
@@ -1007,9 +1007,9 @@ func TestFind(t *testing.T) {
 
 	t.Run("find -name filters by glob", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		fs.MkdirAll("/d", 0755)
-		afero.WriteFile(fs, "/d/a.txt", []byte(""), 0644)
-		afero.WriteFile(fs, "/d/b.go", []byte(""), 0644)
+		fs.MkdirAll("/d", 0o755)
+		afero.WriteFile(fs, "/d/a.txt", []byte(""), 0o644)
+		afero.WriteFile(fs, "/d/b.go", []byte(""), 0o644)
 		var buf bytes.Buffer
 		s := newTestShell(t, &buf, shell.WithFS(fs))
 
@@ -1027,8 +1027,8 @@ func TestFind(t *testing.T) {
 
 	t.Run("find -type f lists only files", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		fs.MkdirAll("/d/sub", 0755)
-		afero.WriteFile(fs, "/d/f.txt", []byte(""), 0644)
+		fs.MkdirAll("/d/sub", 0o755)
+		afero.WriteFile(fs, "/d/f.txt", []byte(""), 0o644)
 		var buf bytes.Buffer
 		s := newTestShell(t, &buf, shell.WithFS(fs))
 
@@ -1046,8 +1046,8 @@ func TestFind(t *testing.T) {
 
 	t.Run("find -type d lists only directories", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		fs.MkdirAll("/d/sub", 0755)
-		afero.WriteFile(fs, "/d/f.txt", []byte(""), 0644)
+		fs.MkdirAll("/d/sub", 0o755)
+		afero.WriteFile(fs, "/d/f.txt", []byte(""), 0o644)
 		var buf bytes.Buffer
 		s := newTestShell(t, &buf, shell.WithFS(fs))
 
@@ -1073,7 +1073,7 @@ func TestSortUniqCutTr(t *testing.T) {
 
 	t.Run("sort basic", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		afero.WriteFile(fs, "/f", []byte("banana\napple\ncherry\n"), 0644)
+		afero.WriteFile(fs, "/f", []byte("banana\napple\ncherry\n"), 0o644)
 		var buf bytes.Buffer
 		s := newTestShell(t, &buf, shell.WithFS(fs))
 		if err := s.Run(ctx, "sort /f"); err != nil {
@@ -1087,7 +1087,7 @@ func TestSortUniqCutTr(t *testing.T) {
 
 	t.Run("sort -r reverse", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		afero.WriteFile(fs, "/f", []byte("banana\napple\ncherry\n"), 0644)
+		afero.WriteFile(fs, "/f", []byte("banana\napple\ncherry\n"), 0o644)
 		var buf bytes.Buffer
 		s := newTestShell(t, &buf, shell.WithFS(fs))
 		if err := s.Run(ctx, "sort -r /f"); err != nil {
@@ -1101,7 +1101,7 @@ func TestSortUniqCutTr(t *testing.T) {
 
 	t.Run("sort -u deduplicates", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		afero.WriteFile(fs, "/f", []byte("b\na\nb\na\n"), 0644)
+		afero.WriteFile(fs, "/f", []byte("b\na\nb\na\n"), 0o644)
 		var buf bytes.Buffer
 		s := newTestShell(t, &buf, shell.WithFS(fs))
 		if err := s.Run(ctx, "sort -u /f"); err != nil {
@@ -1115,7 +1115,7 @@ func TestSortUniqCutTr(t *testing.T) {
 
 	t.Run("sort -n numeric", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		afero.WriteFile(fs, "/f", []byte("10\n2\n30\n"), 0644)
+		afero.WriteFile(fs, "/f", []byte("10\n2\n30\n"), 0o644)
 		var buf bytes.Buffer
 		s := newTestShell(t, &buf, shell.WithFS(fs))
 		if err := s.Run(ctx, "sort -n /f"); err != nil {
@@ -1129,7 +1129,7 @@ func TestSortUniqCutTr(t *testing.T) {
 
 	t.Run("uniq deduplicates adjacent lines", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		afero.WriteFile(fs, "/f", []byte("a\na\nb\nb\nc\n"), 0644)
+		afero.WriteFile(fs, "/f", []byte("a\na\nb\nb\nc\n"), 0o644)
 		var buf bytes.Buffer
 		s := newTestShell(t, &buf, shell.WithFS(fs))
 		if err := s.Run(ctx, "uniq /f"); err != nil {
@@ -1143,7 +1143,7 @@ func TestSortUniqCutTr(t *testing.T) {
 
 	t.Run("uniq -c counts occurrences", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		afero.WriteFile(fs, "/f", []byte("a\na\na\nb\n"), 0644)
+		afero.WriteFile(fs, "/f", []byte("a\na\na\nb\n"), 0o644)
 		var buf bytes.Buffer
 		s := newTestShell(t, &buf, shell.WithFS(fs))
 		if err := s.Run(ctx, "uniq -c /f"); err != nil {
@@ -1156,7 +1156,7 @@ func TestSortUniqCutTr(t *testing.T) {
 
 	t.Run("cut -d: -f2 extracts second field", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		afero.WriteFile(fs, "/f", []byte("a:b:c\n1:2:3\n"), 0644)
+		afero.WriteFile(fs, "/f", []byte("a:b:c\n1:2:3\n"), 0o644)
 		var buf bytes.Buffer
 		s := newTestShell(t, &buf, shell.WithFS(fs))
 		if err := s.Run(ctx, "cut -d : -f 2 /f"); err != nil {
@@ -1170,7 +1170,7 @@ func TestSortUniqCutTr(t *testing.T) {
 
 	t.Run("cut -c 1-3 extracts first three characters", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		afero.WriteFile(fs, "/f", []byte("hello\nworld\n"), 0644)
+		afero.WriteFile(fs, "/f", []byte("hello\nworld\n"), 0o644)
 		var buf bytes.Buffer
 		s := newTestShell(t, &buf, shell.WithFS(fs))
 		if err := s.Run(ctx, "cut -c 1-3 /f"); err != nil {
@@ -1216,7 +1216,7 @@ func TestChmodDiffStatHelp(t *testing.T) {
 
 	t.Run("chmod changes file mode", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		afero.WriteFile(fs, "/f.txt", []byte("data"), 0644)
+		afero.WriteFile(fs, "/f.txt", []byte("data"), 0o644)
 		var buf bytes.Buffer
 		s := newTestShell(t, &buf, shell.WithFS(fs))
 		if err := s.Run(ctx, "chmod 755 /f.txt && stat /f.txt"); err != nil {
@@ -1239,7 +1239,7 @@ func TestChmodDiffStatHelp(t *testing.T) {
 
 	t.Run("stat shows file metadata", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		afero.WriteFile(fs, "/data.txt", []byte("hello"), 0644)
+		afero.WriteFile(fs, "/data.txt", []byte("hello"), 0o644)
 		var buf bytes.Buffer
 		s := newTestShell(t, &buf, shell.WithFS(fs))
 		if err := s.Run(ctx, "stat /data.txt"); err != nil {
@@ -1255,8 +1255,8 @@ func TestChmodDiffStatHelp(t *testing.T) {
 
 	t.Run("diff identical files returns no output", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		afero.WriteFile(fs, "/a", []byte("line1\nline2\n"), 0644)
-		afero.WriteFile(fs, "/b", []byte("line1\nline2\n"), 0644)
+		afero.WriteFile(fs, "/a", []byte("line1\nline2\n"), 0o644)
+		afero.WriteFile(fs, "/b", []byte("line1\nline2\n"), 0o644)
 		var buf bytes.Buffer
 		s := newTestShell(t, &buf, shell.WithFS(fs))
 		if err := s.Run(ctx, "diff /a /b"); err != nil {
@@ -1269,8 +1269,8 @@ func TestChmodDiffStatHelp(t *testing.T) {
 
 	t.Run("diff different files shows changes", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		afero.WriteFile(fs, "/a", []byte("same\nonly-a\n"), 0644)
-		afero.WriteFile(fs, "/b", []byte("same\nonly-b\n"), 0644)
+		afero.WriteFile(fs, "/a", []byte("same\nonly-a\n"), 0o644)
+		afero.WriteFile(fs, "/b", []byte("same\nonly-b\n"), 0o644)
 		var buf bytes.Buffer
 		s := newTestShell(t, &buf, shell.WithFS(fs))
 		err := s.Run(ctx, "diff /a /b")
@@ -1328,7 +1328,7 @@ func TestAwk(t *testing.T) {
 
 	t.Run("awk processes virtual FS file", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		afero.WriteFile(fs, "/data.txt", []byte("alice 30\nbob 25\n"), 0644)
+		afero.WriteFile(fs, "/data.txt", []byte("alice 30\nbob 25\n"), 0o644)
 		var buf bytes.Buffer
 		s := newTestShell(t, &buf, shell.WithFS(fs))
 		if err := s.Run(ctx, `awk '{print $1}' /data.txt`); err != nil {
@@ -1342,8 +1342,8 @@ func TestAwk(t *testing.T) {
 
 	t.Run("awk -f reads program from virtual FS", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		afero.WriteFile(fs, "/prog.awk", []byte("{print $2}"), 0644)
-		afero.WriteFile(fs, "/data.txt", []byte("foo bar\nbaz qux\n"), 0644)
+		afero.WriteFile(fs, "/prog.awk", []byte("{print $2}"), 0o644)
+		afero.WriteFile(fs, "/data.txt", []byte("foo bar\nbaz qux\n"), 0o644)
 		var buf bytes.Buffer
 		s := newTestShell(t, &buf, shell.WithFS(fs))
 		if err := s.Run(ctx, "awk -f /prog.awk /data.txt"); err != nil {
@@ -1357,7 +1357,7 @@ func TestAwk(t *testing.T) {
 
 	t.Run("awk NR counts lines", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		afero.WriteFile(fs, "/f", []byte("a\nb\nc\n"), 0644)
+		afero.WriteFile(fs, "/f", []byte("a\nb\nc\n"), 0o644)
 		var buf bytes.Buffer
 		s := newTestShell(t, &buf, shell.WithFS(fs))
 		if err := s.Run(ctx, `awk 'END{print NR}' /f`); err != nil {
@@ -1426,7 +1426,7 @@ func TestPluginInterface(t *testing.T) {
 
 	t.Run("native wc -l counts lines from virtual FS file", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		afero.WriteFile(fs, "/lines.txt", []byte("a\nb\nc\n"), 0644)
+		afero.WriteFile(fs, "/lines.txt", []byte("a\nb\nc\n"), 0o644)
 		var buf bytes.Buffer
 		s := newTestShell(t, &buf, shell.WithFS(fs))
 		if err := s.Run(ctx, "wc -l /lines.txt"); err != nil {

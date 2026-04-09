@@ -105,7 +105,7 @@ func TestBc(t *testing.T) {
 
 	t.Run("file input", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		afero.WriteFile(fs, "/calc.bc", []byte("10 * 10\n"), 0644)
+		afero.WriteFile(fs, "/calc.bc", []byte("10 * 10\n"), 0o644)
 		var buf strings.Builder
 		s := NewTestShell(t, &buf, shell.WithFS(fs))
 		if err := s.Run(ctx, "bc -q /calc.bc"); err != nil {

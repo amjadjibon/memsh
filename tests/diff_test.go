@@ -23,7 +23,7 @@ func TestDiff(t *testing.T) {
 
 	writeFile := func(fs afero.Fs, path, content string) {
 		t.Helper()
-		if err := afero.WriteFile(fs, path, []byte(content), 0644); err != nil {
+		if err := afero.WriteFile(fs, path, []byte(content), 0o644); err != nil {
 			t.Fatalf("WriteFile %s: %v", path, err)
 		}
 	}

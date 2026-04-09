@@ -99,7 +99,7 @@ func runCronJob(ctx context.Context, t time.Time, command string, ss Snap, baseO
 
 	existing, _ := afero.ReadFile(ss.Fs, cron.CronLogFile)
 	updated := append(existing, []byte(entry)...)
-	if writeErr := afero.WriteFile(ss.Fs, cron.CronLogFile, updated, 0644); writeErr != nil {
+	if writeErr := afero.WriteFile(ss.Fs, cron.CronLogFile, updated, 0o644); writeErr != nil {
 		log.Printf("cron: session %s: write log: %v", ss.ID, writeErr)
 	}
 }

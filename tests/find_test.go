@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/spf13/afero"
 	"github.com/amjadjibon/memsh/pkg/shell"
+	"github.com/spf13/afero"
 )
 
 func TestFind(t *testing.T) {
@@ -14,9 +14,9 @@ func TestFind(t *testing.T) {
 
 	t.Run("find lists all entries under path", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		fs.MkdirAll("/d", 0755)
-		afero.WriteFile(fs, "/d/a.txt", []byte(""), 0644)
-		afero.WriteFile(fs, "/d/b.go", []byte(""), 0644)
+		fs.MkdirAll("/d", 0o755)
+		afero.WriteFile(fs, "/d/a.txt", []byte(""), 0o644)
+		afero.WriteFile(fs, "/d/b.go", []byte(""), 0o644)
 		var buf strings.Builder
 		s := NewTestShell(t, &buf, shell.WithFS(fs))
 
@@ -34,9 +34,9 @@ func TestFind(t *testing.T) {
 
 	t.Run("find -name filters by glob", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		fs.MkdirAll("/d", 0755)
-		afero.WriteFile(fs, "/d/a.txt", []byte(""), 0644)
-		afero.WriteFile(fs, "/d/b.go", []byte(""), 0644)
+		fs.MkdirAll("/d", 0o755)
+		afero.WriteFile(fs, "/d/a.txt", []byte(""), 0o644)
+		afero.WriteFile(fs, "/d/b.go", []byte(""), 0o644)
 		var buf strings.Builder
 		s := NewTestShell(t, &buf, shell.WithFS(fs))
 
@@ -54,8 +54,8 @@ func TestFind(t *testing.T) {
 
 	t.Run("find -type f lists only files", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		fs.MkdirAll("/d/sub", 0755)
-		afero.WriteFile(fs, "/d/f.txt", []byte(""), 0644)
+		fs.MkdirAll("/d/sub", 0o755)
+		afero.WriteFile(fs, "/d/f.txt", []byte(""), 0o644)
 		var buf strings.Builder
 		s := NewTestShell(t, &buf, shell.WithFS(fs))
 
@@ -73,8 +73,8 @@ func TestFind(t *testing.T) {
 
 	t.Run("find -type d lists only directories", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		fs.MkdirAll("/d/sub", 0755)
-		afero.WriteFile(fs, "/d/f.txt", []byte(""), 0644)
+		fs.MkdirAll("/d/sub", 0o755)
+		afero.WriteFile(fs, "/d/f.txt", []byte(""), 0o644)
 		var buf strings.Builder
 		s := NewTestShell(t, &buf, shell.WithFS(fs))
 

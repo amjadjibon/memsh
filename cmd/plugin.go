@@ -95,7 +95,7 @@ var pluginInstallCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		if err := os.MkdirAll(dir, 0755); err != nil {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return err
 		}
 
@@ -184,7 +184,7 @@ func installRuntime(lang string) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
 

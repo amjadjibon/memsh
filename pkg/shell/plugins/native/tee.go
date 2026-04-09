@@ -3,11 +3,12 @@ package native
 import (
 	"context"
 	"fmt"
+	"io"
+	"os"
+
 	"github.com/amjadjibon/memsh/pkg/shell/plugins"
 	"github.com/spf13/afero"
-	"io"
 	"mvdan.cc/sh/v3/interp"
-	"os"
 )
 
 type TeePlugin struct{}
@@ -60,7 +61,7 @@ func runTee(ctx context.Context, args []string) error {
 		var f afero.File
 		var err error
 		if appendMode {
-			f, err = sc.FS.OpenFile(absPath, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0644)
+			f, err = sc.FS.OpenFile(absPath, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o644)
 		} else {
 			f, err = sc.FS.Create(absPath)
 		}

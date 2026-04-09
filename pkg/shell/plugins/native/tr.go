@@ -4,8 +4,9 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"mvdan.cc/sh/v3/interp"
 	"strings"
+
+	"mvdan.cc/sh/v3/interp"
 )
 
 type TrPlugin struct{}

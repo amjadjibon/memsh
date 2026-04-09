@@ -268,4 +268,3 @@ func cmdGitHashObject(w io.Writer, errW io.Writer, fs afero.Fs, cwd string, args
 	_ = errW
 	return nil
 }
-

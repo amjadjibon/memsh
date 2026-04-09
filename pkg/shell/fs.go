@@ -35,8 +35,7 @@ func (s *Shell) openHandler(ctx context.Context, path string, flag int, perm os.
 type urlReadCloser struct{ *bytes.Reader }
 
 func (urlReadCloser) Write(_ []byte) (int, error) { return 0, errors.New("read-only: URL source") }
-func (urlReadCloser) Close() error                 { return nil }
-
+func (urlReadCloser) Close() error                { return nil }
 
 // resolvePath resolves a path relative to the current working directory.
 func (s *Shell) resolvePath(path string) string {

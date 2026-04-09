@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/spf13/afero"
 	"github.com/amjadjibon/memsh/pkg/shell"
+	"github.com/spf13/afero"
 )
 
 func TestGoja(t *testing.T) {
@@ -38,7 +38,7 @@ func TestGoja(t *testing.T) {
 
 	t.Run("goja executes file from virtual FS", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		afero.WriteFile(fs, "/script.js", []byte(`console.log("hello from file")`), 0644)
+		afero.WriteFile(fs, "/script.js", []byte(`console.log("hello from file")`), 0o644)
 		var buf strings.Builder
 		s := NewTestShell(t, &buf, shell.WithFS(fs))
 
@@ -101,7 +101,7 @@ func TestGoja(t *testing.T) {
 
 	t.Run("goja fs.readFile reads from virtual FS", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		afero.WriteFile(fs, "/data.txt", []byte("hello from fs"), 0644)
+		afero.WriteFile(fs, "/data.txt", []byte("hello from fs"), 0o644)
 		var buf strings.Builder
 		s := NewTestShell(t, &buf, shell.WithFS(fs))
 

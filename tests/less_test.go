@@ -43,7 +43,7 @@ func TestLess(t *testing.T) {
 
 	t.Run("pager mode emits sentinel", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		afero.WriteFile(fs, "/data.txt", []byte("line1\nline2\nline3\n"), 0644)
+		afero.WriteFile(fs, "/data.txt", []byte("line1\nline2\nline3\n"), 0o644)
 		var buf strings.Builder
 		s := newShell(t, &buf, fs)
 		if err := s.Run(pagerCtx, "less /data.txt"); err != nil {
@@ -64,7 +64,7 @@ func TestLess(t *testing.T) {
 
 	t.Run("repl mode outputs raw content no sentinel", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		afero.WriteFile(fs, "/data.txt", []byte("hello\nworld\n"), 0644)
+		afero.WriteFile(fs, "/data.txt", []byte("hello\nworld\n"), 0o644)
 		var buf strings.Builder
 		s := newShell(t, &buf, fs)
 		if err := s.Run(replCtx, "less /data.txt"); err != nil {
@@ -81,7 +81,7 @@ func TestLess(t *testing.T) {
 
 	t.Run("more alias pager mode", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		afero.WriteFile(fs, "/f.txt", []byte("hello\n"), 0644)
+		afero.WriteFile(fs, "/f.txt", []byte("hello\n"), 0o644)
 		var buf strings.Builder
 		s := newShell(t, &buf, fs)
 		if err := s.Run(pagerCtx, "more /f.txt"); err != nil {
@@ -94,7 +94,7 @@ func TestLess(t *testing.T) {
 
 	t.Run("more alias repl mode no sentinel", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		afero.WriteFile(fs, "/f.txt", []byte("hi\n"), 0644)
+		afero.WriteFile(fs, "/f.txt", []byte("hi\n"), 0o644)
 		var buf strings.Builder
 		s := newShell(t, &buf, fs)
 		if err := s.Run(replCtx, "more /f.txt"); err != nil {
@@ -120,7 +120,7 @@ func TestLess(t *testing.T) {
 
 	t.Run("+N sets start line in metadata", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		afero.WriteFile(fs, "/f.txt", []byte("a\nb\nc\nd\ne\n"), 0644)
+		afero.WriteFile(fs, "/f.txt", []byte("a\nb\nc\nd\ne\n"), 0o644)
 		var buf strings.Builder
 		s := newShell(t, &buf, fs)
 		if err := s.Run(pagerCtx, "less +3 /f.txt"); err != nil {
@@ -137,7 +137,7 @@ func TestLess(t *testing.T) {
 
 	t.Run("-n disables line numbers", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		afero.WriteFile(fs, "/f.txt", []byte("x\n"), 0644)
+		afero.WriteFile(fs, "/f.txt", []byte("x\n"), 0o644)
 		var buf strings.Builder
 		s := newShell(t, &buf, fs)
 		if err := s.Run(pagerCtx, "less -n /f.txt"); err != nil {
@@ -154,7 +154,7 @@ func TestLess(t *testing.T) {
 
 	t.Run("-N enables line numbers", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		afero.WriteFile(fs, "/f.txt", []byte("x\n"), 0644)
+		afero.WriteFile(fs, "/f.txt", []byte("x\n"), 0o644)
 		var buf strings.Builder
 		s := newShell(t, &buf, fs)
 		if err := s.Run(pagerCtx, "less -N /f.txt"); err != nil {
@@ -171,7 +171,7 @@ func TestLess(t *testing.T) {
 
 	t.Run("unknown flags silently ignored", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		afero.WriteFile(fs, "/f.txt", []byte("ok\n"), 0644)
+		afero.WriteFile(fs, "/f.txt", []byte("ok\n"), 0o644)
 		var buf strings.Builder
 		s := newShell(t, &buf, fs)
 		if err := s.Run(pagerCtx, "less -FXr /f.txt"); err != nil {

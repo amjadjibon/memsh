@@ -216,7 +216,6 @@ func (s *Shell) runWASIPlugin(ctx context.Context, compiled wazero.CompiledModul
 	return nil
 }
 
-
 // runCustomPlugin runs a memsh-native plugin (exports run(argc) and uses memsh:: host functions).
 // A fresh memsh host module is instantiated per invocation and closed when done,
 // so the per-call closures (hc, args) are properly scoped.
@@ -389,4 +388,3 @@ func (s *Shell) closeFd(fd uint32) {
 		delete(s.fds, fd)
 	}
 }
-

@@ -160,7 +160,7 @@ func cmdGitRestore(w io.Writer, errW io.Writer, fs afero.Fs, cwd string, args []
 
 		if staged {
 			// Restore index entry from HEAD — write file content then re-add.
-			if err := afero.WriteFile(fs, abs, []byte(content), 0644); err != nil {
+			if err := afero.WriteFile(fs, abs, []byte(content), 0o644); err != nil {
 				return fmt.Errorf("git restore: %w", err)
 			}
 			if _, err := wt.Add(rel); err != nil {
@@ -168,7 +168,7 @@ func cmdGitRestore(w io.Writer, errW io.Writer, fs afero.Fs, cwd string, args []
 			}
 		} else {
 			// Restore worktree.
-			if err := afero.WriteFile(fs, abs, []byte(content), 0644); err != nil {
+			if err := afero.WriteFile(fs, abs, []byte(content), 0o644); err != nil {
 				return fmt.Errorf("git restore: %w", err)
 			}
 		}

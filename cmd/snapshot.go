@@ -54,7 +54,7 @@ Example:
 		if err != nil {
 			return err
 		}
-		if err := os.WriteFile(outFile, data, 0644); err != nil {
+		if err := os.WriteFile(outFile, data, 0o644); err != nil {
 			return fmt.Errorf("snapshot save: write %s: %w", outFile, err)
 		}
 		fmt.Fprintf(os.Stderr, "memsh: snapshot saved to %s (%d files, cwd=%s)\n",

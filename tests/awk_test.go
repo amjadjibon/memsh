@@ -25,7 +25,7 @@ func TestAwk(t *testing.T) {
 
 	t.Run("awk processes virtual FS file", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		afero.WriteFile(fs, "/data.txt", []byte("alice 30\nbob 25\n"), 0644)
+		afero.WriteFile(fs, "/data.txt", []byte("alice 30\nbob 25\n"), 0o644)
 		var buf strings.Builder
 		s := NewTestShell(t, &buf, shell.WithFS(fs))
 		if err := s.Run(ctx, `awk '{print $1}' /data.txt`); err != nil {
@@ -39,8 +39,8 @@ func TestAwk(t *testing.T) {
 
 	t.Run("awk -f reads program from virtual FS", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		afero.WriteFile(fs, "/prog.awk", []byte("{print $2}"), 0644)
-		afero.WriteFile(fs, "/data.txt", []byte("foo bar\nbaz qux\n"), 0644)
+		afero.WriteFile(fs, "/prog.awk", []byte("{print $2}"), 0o644)
+		afero.WriteFile(fs, "/data.txt", []byte("foo bar\nbaz qux\n"), 0o644)
 
 		var buf strings.Builder
 		s := NewTestShell(t, &buf, shell.WithFS(fs))

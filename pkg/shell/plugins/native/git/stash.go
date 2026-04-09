@@ -58,7 +58,7 @@ func writeStash(fs afero.Fs, root string, entries []string) error {
 	if content != "" {
 		content += "\n"
 	}
-	return afero.WriteFile(fs, p, []byte(content), 0644)
+	return afero.WriteFile(fs, p, []byte(content), 0o644)
 }
 
 // ---------------------------------------------------------------------------
@@ -244,10 +244,10 @@ func gitStashApply(w io.Writer, errW io.Writer, fs afero.Fs, repo *gogit.Reposit
 			return err
 		}
 		absPath := filepath.Join(root, f.Name)
-		if mkErr := fs.MkdirAll(filepath.Dir(absPath), 0755); mkErr != nil {
+		if mkErr := fs.MkdirAll(filepath.Dir(absPath), 0o755); mkErr != nil {
 			return mkErr
 		}
-		return afero.WriteFile(fs, absPath, []byte(content), 0644)
+		return afero.WriteFile(fs, absPath, []byte(content), 0o644)
 	}); err != nil {
 		return fmt.Errorf("git stash apply: %w", err)
 	}

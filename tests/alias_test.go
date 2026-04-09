@@ -82,7 +82,7 @@ func TestAlias(t *testing.T) {
 		s := NewTestShell(t, &buf, shell.WithFS(afero.NewMemMapFs()))
 		// alias ls='ls -la' — ls expands to ls -la, which calls builtinLs (not re-expanded)
 		fs := afero.NewMemMapFs()
-		_ = afero.WriteFile(fs, "/test.txt", []byte("data"), 0644)
+		_ = afero.WriteFile(fs, "/test.txt", []byte("data"), 0o644)
 		var buf2 strings.Builder
 		s2 := NewTestShell(t, &buf2, shell.WithFS(fs))
 		if err := s2.Run(ctx, "alias ls='ls -la' && ls /"); err != nil {
@@ -110,7 +110,7 @@ func TestAlias(t *testing.T) {
 
 	t.Run("alias in pipeline", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		_ = afero.WriteFile(fs, "/data.txt", []byte("apple\nbanana\napricot\n"), 0644)
+		_ = afero.WriteFile(fs, "/data.txt", []byte("apple\nbanana\napricot\n"), 0o644)
 		var buf strings.Builder
 		s := NewTestShell(t, &buf, shell.WithFS(fs))
 		if err := s.Run(ctx, "alias g='grep a' && g /data.txt"); err != nil {
@@ -123,7 +123,7 @@ func TestAlias(t *testing.T) {
 
 	t.Run("memshrc loaded from virtual FS", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		_ = afero.WriteFile(fs, "/.memshrc", []byte("alias hi='echo from-rc'\n"), 0644)
+		_ = afero.WriteFile(fs, "/.memshrc", []byte("alias hi='echo from-rc'\n"), 0o644)
 		var buf strings.Builder
 		s := NewTestShell(t, &buf, shell.WithFS(fs))
 		if err := s.LoadMemshrc(ctx); err != nil {

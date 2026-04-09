@@ -77,7 +77,7 @@ cat /dist/sources.b64 | base64 -d
 [INFO]  2024-01-01 08:02:31 gc triggered
 [ERROR] 2024-01-01 08:05:00 disk full: /var/data
 [INFO]  2024-01-01 08:05:10 cleanup started
-`), 0644)
+`), 0o644)
 
 	var out3 bytes.Buffer
 	sh3, err := shell.New(
