@@ -60,4 +60,4 @@ require (
 	modernc.org/memory v1.11.0 // indirect
 )
 
-replace mvdan.cc/sh/v3 => github.com/amjadjibon/sh/v3 v3.0.0-20260406134937-18d6e68b8bd9
+replace mvdan.cc/sh/v3 => github.com/amjadjibon/sh/v3 v3.0.0-20260409065902-63544658a831
