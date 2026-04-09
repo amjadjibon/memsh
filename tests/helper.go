@@ -4,7 +4,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/amjadjibon/memsh/shell"
+	"github.com/amjadjibon/memsh/pkg/shell"
 )
 
 // NewTestShell creates a shell for testing with stdout/stderr wired to buf

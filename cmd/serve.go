@@ -28,9 +28,9 @@ import (
 	"github.com/spf13/cobra"
 	gossh "golang.org/x/crypto/ssh"
 
-	"github.com/amjadjibon/memsh/shell"
-	"github.com/amjadjibon/memsh/shell/cron"
-	"github.com/amjadjibon/memsh/shell/plugins/native"
+	"github.com/amjadjibon/memsh/pkg/shell"
+	"github.com/amjadjibon/memsh/pkg/shell/cron"
+	"github.com/amjadjibon/memsh/pkg/shell/plugins/native"
 	"github.com/amjadjibon/memsh/web"
 )
 

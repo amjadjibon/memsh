@@ -3,7 +3,7 @@ package cmd
 import (
 	"strings"
 
-	"github.com/amjadjibon/memsh/shell"
+	"github.com/amjadjibon/memsh/pkg/shell"
 )
 
 type replCompleter struct {
