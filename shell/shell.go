@@ -134,6 +134,7 @@ func New(opts ...Option) (*Shell, error) {
 		interp.OpenHandler(s.openHandler),
 		interp.ReadDirHandler2(s.readDirHandler),
 		interp.StatHandler(s.statHandler),
+		interp.AccessHandler(s.accessHandler),
 		interp.ExecHandlers(s.execHandler),
 		interp.Interactive(true), // enable alias expansion
 	)
@@ -438,4 +439,33 @@ func (s *Shell) statHandler(_ context.Context, name string, _ bool) (fs.FileInfo
 		absPath = filepath.Join(s.cwd, name)
 	}
 	return s.fs.Stat(absPath)
+}
+
+func (s *Shell) accessHandler(_ context.Context, path string, mode uint32) error {
+	absPath := path
+	if !filepath.IsAbs(path) {
+		absPath = filepath.Join(s.cwd, path)
+	}
+
+	info, err := s.fs.Stat(absPath)
+	if err != nil {
+		return err
+	}
+
+	m := info.Mode()
+	switch mode {
+	case 0x1: // X_OK
+		if m&0o111 == 0 {
+			return &os.PathError{Op: "access", Path: path, Err: fmt.Errorf("file is not executable")}
+		}
+	case 0x2: // W_OK
+		if m&0o222 == 0 {
+			return &os.PathError{Op: "access", Path: path, Err: fmt.Errorf("file is not writable")}
+		}
+	case 0x4: // R_OK
+		if m&0o444 == 0 {
+			return &os.PathError{Op: "access", Path: path, Err: fmt.Errorf("file is not readable")}
+		}
+	}
+	return nil
 }
