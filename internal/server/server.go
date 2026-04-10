@@ -253,7 +253,7 @@ func (h *Handler) handleComplete(w http.ResponseWriter, r *http.Request) {
 		req.Cursor = len(req.Input)
 	}
 
-	var fs afero.Fs = afero.NewMemMapFs()
+	fs := afero.NewMemMapFs()
 	cwd := "/"
 	if sessionID := r.Header.Get("X-Session-ID"); sessionID != "" {
 		if entry, ok := h.Store.Get(sessionID); ok {

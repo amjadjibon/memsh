@@ -80,7 +80,7 @@ func (AwkPlugin) Run(ctx context.Context, args []string) error {
 	}
 
 	// For virtual FS file args, read their content and combine into one reader.
-	var stdin io.Reader = hc.Stdin
+	stdin := hc.Stdin
 	if len(files) > 0 {
 		var readers []io.Reader
 		for _, f := range files {

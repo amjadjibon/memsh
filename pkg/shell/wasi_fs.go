@@ -202,6 +202,7 @@ func (f *aferoSysFile) Pread(buf []byte, off int64) (int, experimentalsys.Errno)
 	return n, 0
 }
 
+//nolint:govet
 func (f *aferoSysFile) Seek(offset int64, whence int) (int64, experimentalsys.Errno) {
 	n, err := f.f.Seek(offset, whence)
 	if err != nil {
@@ -290,6 +291,7 @@ func (d *aferoSysDirFile) Readdir(n int) ([]experimentalsys.Dirent, experimental
 	return dirents, 0
 }
 
+//nolint:govet
 func (d *aferoSysDirFile) Seek(offset int64, whence int) (int64, experimentalsys.Errno) {
 	if whence == io.SeekStart && offset == 0 {
 		_, err := d.f.Seek(0, 0)
