@@ -23,6 +23,7 @@ go.work
 
 # Binary
 bin/
+dist/
 
 # Demo scripts (removed due to security concerns)
 scripts/
