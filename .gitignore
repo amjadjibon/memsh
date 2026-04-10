@@ -26,3 +26,7 @@ bin/
 
 # Demo scripts (removed due to security concerns)
 scripts/
+
+# Environment
+.env
+.env.local
