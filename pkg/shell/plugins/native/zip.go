@@ -97,7 +97,7 @@ func runZip(ctx context.Context, args []string) error {
 	}
 
 	if len(positional) < 2 {
-		return fmt.Errorf("zip: usage: zip [-r] archive.zip file...")
+		return fmt.Errorf("zip: usage: zip [-r] archive.zip file")
 	}
 	archivePath := sc.ResolvePath(positional[0])
 	sources := positional[1:]

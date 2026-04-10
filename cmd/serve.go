@@ -6,7 +6,6 @@ import (
 	"crypto/rand"
 	"crypto/subtle"
 	_ "embed"
-	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
@@ -590,7 +589,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 			req.Cursor = len(req.Input)
 		}
 
-		var fs afero.Fs = afero.NewMemMapFs()
+		fs := afero.NewMemMapFs()
 		cwd := "/"
 		if sessionID := r.Header.Get("X-Session-ID"); sessionID != "" {
 			if entry, ok := store.get(sessionID); ok {
@@ -1022,15 +1021,6 @@ func corsMiddleware(next http.Handler, allowedOrigin string) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
-}
-
-// generateAPIKey creates a cryptographically random 32-byte hex-encoded API key.
-func generateAPIKey() (string, error) {
-	b := make([]byte, 32)
-	if _, err := rand.Read(b); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(b), nil
 }
 
 func init() {

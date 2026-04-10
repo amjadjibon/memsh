@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/amjadjibon/memsh/pkg/shell/plugins"
-	"github.com/spf13/afero"
 	"golang.org/x/term"
 	"mvdan.cc/sh/v3/interp"
 )
@@ -234,18 +233,6 @@ func runeIndex(set []rune, r rune) int {
 		}
 	}
 	return -1
-}
-
-func sortInts(values []int) {
-	for i := 1; i < len(values); i++ {
-		for j := i; j > 0 && values[j] < values[j-1]; j-- {
-			values[j], values[j-1] = values[j-1], values[j]
-		}
-	}
-}
-
-func readAllVirtual(sc plugins.ShellContext, path string) ([]byte, error) {
-	return afero.ReadFile(sc.FS, sc.ResolvePath(path))
 }
 
 func parseDuration(s string) (time.Duration, error) {

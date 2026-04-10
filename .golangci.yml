@@ -1,0 +1,26 @@
+version: "2"
+
+linters:
+  default: none
+  enable:
+    # - errcheck # checks for unhandled errors
+    - unused # checks Go code for unused constants, variables, functions and types
+    - govet # checks for common mistakes and suspicious constructs
+    - staticcheck # checks for common mistakes and suspicious constructs
+
+# Configuration of the formatters used by 'golangci-lint fmt'
+formatters:
+  enable:
+    - gofmt # standard Go code formatter
+    - goimports # updates your Go import lines
+    - gofumpt # stricter Go code formatter
+
+# Exclude test files from linting
+run:
+  exclude-dirs:
+    - tests
+
+# Issue management
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
