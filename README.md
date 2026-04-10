@@ -18,24 +18,75 @@ Shell parsing and interpretation is handled by [mvdan.cc/sh/v3](https://github.c
 - **HTTP server** — expose the shell over HTTP with session-scoped virtual filesystems
 - **Library usage** — embed memsh in Go programs for safe, sandboxed shell scripting
 
+## Installation
+
+### Go Install
+
+```bash
+go install github.com/amjadjibon/memsh@latest
+```
+
+### Pre-built Binaries
+
+Download pre-built binaries from the [GitHub Releases](https://github.com/amjadjibon/memsh/releases) page.
+
+**Linux (amd64):**
+
+```bash
+curl -Lo memsh.tar.gz https://github.com/amjadjibon/memsh/releases/latest/download/memsh_linux_amd64.tar.gz
+tar xzf memsh.tar.gz
+sudo mv memsh /usr/local/bin/
+```
+
+**macOS (Apple Silicon):**
+
+```bash
+curl -Lo memsh.tar.gz https://github.com/amjadjibon/memsh/releases/latest/download/memsh_darwin_arm64.tar.gz
+tar xzf memsh.tar.gz
+sudo mv memsh /usr/local/bin/
+```
+
+**macOS (Intel):**
+
+```bash
+curl -Lo memsh.tar.gz https://github.com/amjadjibon/memsh/releases/latest/download/memsh_darwin_amd64.tar.gz
+tar xzf memsh.tar.gz
+sudo mv memsh /usr/local/bin/
+```
+
+**Windows (amd64):**
+
+Download [`memsh_windows_amd64.zip`](https://github.com/amjadjibon/memsh/releases/latest/download/memsh_windows_amd64.zip), extract, and add `memsh.exe` to your `PATH`.
+
+### Build from Source
+
+```bash
+git clone https://github.com/amjadjibon/memsh.git
+cd memsh
+go build -o memsh .
+```
+
+### Verify Installation
+
+```bash
+memsh --help
+```
+
 ## Quick Start
 
 ```bash
-# Build
-go build ./...
-
 # Interactive REPL
-go run .
+memsh
 
 # Run a script
-go run . ./path/to/script.sh
+memsh ./path/to/script.sh
 
 # Pipe commands
-echo "mkdir /tmp && echo hello > /tmp/f && cat /tmp/f" | go run .
+echo "mkdir /tmp && echo hello > /tmp/f && cat /tmp/f" | memsh
 
 # HTTP server
-go run . serve
-go run . serve --addr :3000 --session-ttl 1h --cors
+memsh serve
+memsh serve --addr :3000 --session-ttl 1h --cors
 ```
 
 ## Usage as a Library
