@@ -12,7 +12,7 @@ import (
 //
 //	//go:embed plugins/*.wasm
 //	var builtinPluginsFS embed.FS
-var defaultPlugins = map[string][]byte{}
+var defaultPlugins = map[string]WASMConfig{}
 
 // defaultNativePlugins returns the built-in native Plugin implementations
 // registered on every new Shell unless overridden by a WithPlugin option.

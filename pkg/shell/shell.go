@@ -163,7 +163,7 @@ func New(opts ...Option) (*Shell, error) {
 			wasi_snapshot_preview1.MustInstantiate(initCtx, s.rt)
 
 			for name, wasm := range s.plugins {
-				cm, err := s.rt.CompileModule(initCtx, wasm)
+				cm, err := s.rt.CompileModule(initCtx, wasm.Bytes)
 				if err != nil {
 					_ = s.rt.Close(initCtx)
 					return nil, fmt.Errorf("plugin %s: compile: %w", name, err)

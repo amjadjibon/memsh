@@ -59,7 +59,7 @@ func WithEnv(env map[string]string) Option {
 // a file in /memsh/plugins/. The plugin must export command_name() and run().
 func WithPluginBytes(name string, wasm []byte) Option {
 	return func(s *Shell) {
-		s.plugins[name] = wasm
+		s.plugins[name] = wasmConfigForPlugin(name, wasm)
 	}
 }
 

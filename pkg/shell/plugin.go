@@ -35,8 +35,20 @@ func sysfsConfig(cfg wazero.FSConfig) sysfs.FSConfig {
 	return cfg.(sysfs.FSConfig)
 }
 
-// pluginRegistry maps command name → raw WASM bytes.
-type pluginRegistry map[string][]byte
+// WASMConfig holds WASM plugin bytes and optional runtime tweaks.
+type WASMConfig struct {
+	// Bytes is the raw WASM module.
+	Bytes []byte
+	// ExtraArgs are flags to prepend after the command name (e.g. ["-W0"]).
+	// Existing flags are checked before insertion to avoid duplicates.
+	ExtraArgs []string
+	// ExtraEnv are environment variables to set in the WASI module.
+	// Format: ["KEY=value", ...]
+	ExtraEnv []string
+}
+
+// pluginRegistry maps command name → WASM config.
+type pluginRegistry map[string]WASMConfig
 
 // loadPlugins walks /memsh/plugins/ in the MemMapFs and the real ~/.memsh/plugins/
 // directory, registering each .wasm file by its filename stem as the command name.
@@ -59,7 +71,7 @@ func (s *Shell) loadPlugins() error {
 				if err != nil {
 					return fmt.Errorf("plugin: read %s: %w", path, err)
 				}
-				s.plugins[name] = data
+				s.plugins[name] = wasmConfigForPlugin(name, data)
 			}
 			return nil
 		}); err != nil {
@@ -89,10 +101,26 @@ func (s *Shell) loadPlugins() error {
 			if err != nil {
 				return fmt.Errorf("plugin: read %s: %w", e.Name(), err)
 			}
-			s.plugins[name] = data
+			s.plugins[name] = wasmConfigForPlugin(name, data)
 		}
 	}
 	return nil
+}
+
+// wasmConfigForPlugin returns a WASMConfig with plugin-specific tweaks.
+// For most plugins this is just the raw bytes, but some runtimes require
+// extra flags or environment variables to suppress warnings.
+func wasmConfigForPlugin(name string, bytes []byte) WASMConfig {
+	switch name {
+	case "ruby":
+		return WASMConfig{
+			Bytes:     bytes,
+			ExtraArgs: []string{"-W0"},
+			ExtraEnv:  []string{"RUBYOPT=-W0"},
+		}
+	default:
+		return WASMConfig{Bytes: bytes}
+	}
 }
 
 // pluginAllowed reports whether a discovered plugin name passes the filter.
@@ -121,12 +149,12 @@ func (s *Shell) runPlugin(ctx context.Context, name string, args []string) error
 	cm, ok := s.compiled[name]
 	if !ok {
 		// Plugin added after startup (e.g. dropped into virtual FS at runtime) — compile and cache.
-		wasmBytes, exists := s.plugins[name]
+		wasmCfg, exists := s.plugins[name]
 		if !exists {
 			return fmt.Errorf("plugin %s: not found", name)
 		}
 		var err error
-		cm, err = s.rt.CompileModule(ctx, wasmBytes)
+		cm, err = s.rt.CompileModule(ctx, wasmCfg.Bytes)
 		if err != nil {
 			return fmt.Errorf("plugin %s: compile: %w", name, err)
 		}
@@ -150,6 +178,11 @@ func (s *Shell) runPlugin(ctx context.Context, name string, args []string) error
 // We mount the virtual FS directly via the experimental sysfs API so that
 // WASI writes go straight into afero.MemMapFs — no temp-dir bridge, no races.
 func (s *Shell) runWASIPlugin(ctx context.Context, compiled wazero.CompiledModule, hc interp.HandlerContext, args []string, name string) error {
+	cfg, ok := s.plugins[name]
+	if !ok {
+		return fmt.Errorf("plugin %s: config not found", name)
+	}
+
 	// Resolve relative path args to absolute virtual paths.
 	// Skip arguments that follow flags like -c (Python), -e (Ruby), etc.
 	resolved := make([]string, len(args))
@@ -174,23 +207,30 @@ func (s *Shell) runWASIPlugin(ctx context.Context, compiled wazero.CompiledModul
 		}
 	}
 
-	// Ruby-specific: inject -W0 flag to suppress warnings
-	if name == "ruby" && len(resolved) > 1 {
-		// Check if -W or -W flag already exists
-		hasWarnFlag := false
-		for _, arg := range resolved {
-			if arg == "-W0" || arg == "-w" || (len(arg) >= 2 && arg[0] == '-' && arg[1] == 'W') {
-				hasWarnFlag = true
-				break
+	// Inject plugin-specific extra args (if not already present).
+	if len(cfg.ExtraArgs) > 0 && len(resolved) > 0 {
+		for _, extra := range cfg.ExtraArgs {
+			// Check if this flag already exists in args
+			alreadyPresent := false
+			for _, arg := range resolved {
+				if arg == extra {
+					alreadyPresent = true
+					break
+				}
+				// For flags like -W0, also check -W prefix
+				if len(extra) >= 2 && extra[0] == '-' && len(arg) >= 2 && arg[0] == '-' && extra[1] == 'W' && arg[1] == 'W' {
+					alreadyPresent = true
+					break
+				}
 			}
-		}
-		if !hasWarnFlag {
-			// Insert -W0 after the command name
-			newArgs := make([]string, len(resolved)+1)
-			newArgs[0] = resolved[0]
-			newArgs[1] = "-W0"
-			copy(newArgs[2:], resolved[1:])
-			resolved = newArgs
+			if !alreadyPresent {
+				// Insert after the command name (index 0)
+				newArgs := make([]string, len(resolved)+1)
+				newArgs[0] = resolved[0]
+				newArgs[1] = extra
+				copy(newArgs[2:], resolved[1:])
+				resolved = newArgs
+			}
 		}
 	}
 
@@ -208,9 +248,12 @@ func (s *Shell) runWASIPlugin(ctx context.Context, compiled wazero.CompiledModul
 		WithEnv("PYTHONDONTWRITEBYTECODE", "1").
 		WithName("")
 
-	// Ruby-specific: suppress optional library warnings
-	if name == "ruby" {
-		modConfig = modConfig.WithEnv("RUBYOPT", "-W0")
+	// Add plugin-specific environment variables.
+	for _, envVar := range cfg.ExtraEnv {
+		parts := strings.SplitN(envVar, "=", 2)
+		if len(parts) == 2 {
+			modConfig = modConfig.WithEnv(parts[0], parts[1])
+		}
 	}
 
 	_, runErr := s.rt.InstantiateModule(ctx, compiled, modConfig)
