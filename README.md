@@ -415,7 +415,7 @@ The `make release` command will:
 4. Create and push a git tag
 5. Build binaries for all platforms (Linux, macOS, Windows × AMD64, ARM64)
 6. Create a GitHub Release with all binaries
-7. Generate and push the Homebrew cask to [`homebrew-memsh`](https://github.com/amjadjibon/homebrew-memsh)
+7. **Generate and push the Homebrew cask** automatically via goreleaser to [`homebrew-memsh`](https://github.com/amjadjibon/homebrew-memsh)
 
 After release, users can install via:
 ```bash

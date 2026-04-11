@@ -25,9 +25,6 @@ go.work
 bin/
 dist/
 
-# Demo scripts (removed due to security concerns)
-scripts/
-
 # Environment
 .env
 .env.local
