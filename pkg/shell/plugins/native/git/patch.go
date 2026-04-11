@@ -418,7 +418,7 @@ func sanitizeFilename(s string) string {
 // git apply
 // ---------------------------------------------------------------------------
 
-func cmdGitApply(w io.Writer, errW io.Writer, fs afero.Fs, cwd string, args []string) error {
+func cmdGitApply(_ io.Writer, errW io.Writer, fs afero.Fs, cwd string, args []string) error {
 	repo, root, err := openRepo(fs, cwd)
 	if err != nil {
 		return err
@@ -468,7 +468,6 @@ func cmdGitApply(w io.Writer, errW io.Writer, fs afero.Fs, cwd string, args []st
 		}
 	}
 
-	_ = w
 	return nil
 }
 

@@ -71,7 +71,7 @@ func cmdGitSwitch(w io.Writer, errW io.Writer, fs afero.Fs, cwd string, args []s
 // git restore
 // ---------------------------------------------------------------------------
 
-func cmdGitRestore(w io.Writer, errW io.Writer, fs afero.Fs, cwd string, args []string) error {
+func cmdGitRestore(_ io.Writer, errW io.Writer, fs afero.Fs, cwd string, args []string) error {
 	repo, root, err := openRepo(fs, cwd)
 	if err != nil {
 		return err
@@ -174,6 +174,5 @@ func cmdGitRestore(w io.Writer, errW io.Writer, fs afero.Fs, cwd string, args []
 		}
 	}
 
-	_ = w
 	return nil
 }
