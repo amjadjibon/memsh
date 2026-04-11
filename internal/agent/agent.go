@@ -73,24 +73,42 @@ func bindTools(ctx context.Context, cm model.ToolCallingChatModel, agentTools []
 	return bound, nil
 }
 
-func composeGraph(ctx context.Context, cm model.ToolCallingChatModel, agentTools []tool.BaseTool) (compose.Runnable[string, string], error) {
-	g := compose.NewGraph[string, string](compose.WithGenLocalState(func(ctx context.Context) *State {
-		return &State{History: []*schema.Message{}}
-	}))
+// graphBuilder collects the first error encountered while wiring a compose.Graph,
+// letting each Add*/edge call be written as a one-liner without repetitive if-blocks.
+type graphBuilder struct {
+	g   *compose.Graph[string, string]
+	err error
+}
 
-	err := g.AddLambdaNode(nodeInputConvert, compose.InvokableLambda(
+func (b *graphBuilder) node(name string, err error) {
+	if b.err == nil && err != nil {
+		b.err = fmt.Errorf("add node %s: %w", name, err)
+	}
+}
+
+func (b *graphBuilder) wire(err error) {
+	if b.err == nil {
+		b.err = err
+	}
+}
+
+func composeGraph(ctx context.Context, cm model.ToolCallingChatModel, agentTools []tool.BaseTool) (compose.Runnable[string, string], error) {
+	b := &graphBuilder{
+		g: compose.NewGraph[string, string](compose.WithGenLocalState(func(ctx context.Context) *State {
+			return &State{History: []*schema.Message{}}
+		})),
+	}
+
+	b.node(nodeInputConvert, b.g.AddLambdaNode(nodeInputConvert, compose.InvokableLambda(
 		func(ctx context.Context, input string) ([]*schema.Message, error) {
 			return []*schema.Message{
 				schema.SystemMessage(systemPrompt),
 				schema.UserMessage(input),
 			}, nil
 		},
-	), compose.WithNodeName(nodeInputConvert))
-	if err != nil {
-		return nil, fmt.Errorf("add node %s: %w", nodeInputConvert, err)
-	}
+	), compose.WithNodeName(nodeInputConvert)))
 
-	err = g.AddChatModelNode(nodeChatModel, cm,
+	b.node(nodeChatModel, b.g.AddChatModelNode(nodeChatModel, cm,
 		compose.WithNodeName(nodeChatModel),
 		compose.WithStatePreHandler(func(ctx context.Context, in []*schema.Message, s *State) ([]*schema.Message, error) {
 			s.History = append(s.History, in...)
@@ -100,26 +118,20 @@ func composeGraph(ctx context.Context, cm model.ToolCallingChatModel, agentTools
 			s.History = append(s.History, out)
 			return out, nil
 		}),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("add node %s: %w", nodeChatModel, err)
-	}
+	))
 
 	toolsNode, err := compose.NewToolNode(ctx, &compose.ToolsNodeConfig{Tools: agentTools})
 	if err != nil {
 		return nil, fmt.Errorf("create tools node: %w", err)
 	}
-	err = g.AddToolsNode(nodeToolsNode, toolsNode,
+	b.node(nodeToolsNode, b.g.AddToolsNode(nodeToolsNode, toolsNode,
 		compose.WithNodeName(nodeToolsNode),
 		compose.WithStatePostHandler(func(ctx context.Context, out []*schema.Message, s *State) ([]*schema.Message, error) {
 			return append(out, schema.UserMessage(nextStepPrompt)), nil
 		}),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("add node %s: %w", nodeToolsNode, err)
-	}
+	))
 
-	err = g.AddLambdaNode(nodeHuman, compose.InvokableLambda(
+	b.node(nodeHuman, b.g.AddLambdaNode(nodeHuman, compose.InvokableLambda(
 		func(ctx context.Context, input *schema.Message) ([]*schema.Message, error) {
 			return []*schema.Message{input}, nil
 		},
@@ -130,29 +142,17 @@ func composeGraph(ctx context.Context, cm model.ToolCallingChatModel, agentTools
 			}
 			return in, nil
 		}),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("add node %s: %w", nodeHuman, err)
-	}
+	))
 
-	err = g.AddLambdaNode(nodeOutputConvert, compose.InvokableLambda(
+	b.node(nodeOutputConvert, b.g.AddLambdaNode(nodeOutputConvert, compose.InvokableLambda(
 		func(ctx context.Context, input []*schema.Message) (string, error) {
 			return input[len(input)-1].Content, nil
 		},
-	))
-	if err != nil {
-		return nil, fmt.Errorf("add node %s: %w", nodeOutputConvert, err)
-	}
+	)))
 
-	err = g.AddEdge(compose.START, nodeInputConvert)
-	if err != nil {
-		return nil, err
-	}
-	err = g.AddEdge(nodeInputConvert, nodeChatModel)
-	if err != nil {
-		return nil, err
-	}
-	err = g.AddBranch(nodeChatModel, compose.NewGraphBranch(
+	b.wire(b.g.AddEdge(compose.START, nodeInputConvert))
+	b.wire(b.g.AddEdge(nodeInputConvert, nodeChatModel))
+	b.wire(b.g.AddBranch(nodeChatModel, compose.NewGraphBranch(
 		func(ctx context.Context, in *schema.Message) (string, error) {
 			if len(in.ToolCalls) > 0 {
 				return nodeToolsNode, nil
@@ -160,11 +160,8 @@ func composeGraph(ctx context.Context, cm model.ToolCallingChatModel, agentTools
 			return nodeHuman, nil
 		},
 		map[string]bool{nodeToolsNode: true, nodeHuman: true},
-	))
-	if err != nil {
-		return nil, err
-	}
-	err = g.AddBranch(nodeHuman, compose.NewGraphBranch(
+	)))
+	b.wire(b.g.AddBranch(nodeHuman, compose.NewGraphBranch(
 		func(ctx context.Context, in []*schema.Message) (string, error) {
 			if in[len(in)-1].Role == schema.User {
 				return nodeChatModel, nil
@@ -172,20 +169,15 @@ func composeGraph(ctx context.Context, cm model.ToolCallingChatModel, agentTools
 			return nodeOutputConvert, nil
 		},
 		map[string]bool{nodeChatModel: true, nodeOutputConvert: true},
-	))
-	if err != nil {
-		return nil, err
-	}
-	err = g.AddEdge(nodeToolsNode, nodeChatModel)
-	if err != nil {
-		return nil, err
-	}
-	err = g.AddEdge(nodeOutputConvert, compose.END)
-	if err != nil {
-		return nil, err
+	)))
+	b.wire(b.g.AddEdge(nodeToolsNode, nodeChatModel))
+	b.wire(b.g.AddEdge(nodeOutputConvert, compose.END))
+
+	if b.err != nil {
+		return nil, b.err
 	}
 
-	runner, err := g.Compile(ctx,
+	runner, err := b.g.Compile(ctx,
 		compose.WithCheckPointStore(newInMemoryStore()),
 		compose.WithInterruptBeforeNodes([]string{nodeHuman}),
 	)

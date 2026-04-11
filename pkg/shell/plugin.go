@@ -19,6 +19,17 @@ import (
 	"mvdan.cc/sh/v3/interp"
 )
 
+// Plugin loading priority (first registration wins):
+//
+//  1. WithPluginBytes / WithPlugin options — caller-supplied bytes or compiled modules.
+//  2. defaultNativePlugins() — built-in Go plugins registered at Shell construction.
+//  3. defaultPlugins map — embedded WASM bytes bundled with the binary (currently empty).
+//  4. /memsh/plugins/*.wasm inside the virtual afero.MemMapFs.
+//  5. ~/.memsh/plugins/*.wasm on the real OS filesystem (loaded by loadPlugins).
+//
+// Because the map is checked for existence before inserting, the first source that
+// provides a name wins and later sources are silently skipped.
+
 // sysfsConfig casts wazero.FSConfig to sysfs.FSConfig so WithSysFSMount is available.
 func sysfsConfig(cfg wazero.FSConfig) sysfs.FSConfig {
 	return cfg.(sysfs.FSConfig)
