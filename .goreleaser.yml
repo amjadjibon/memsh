@@ -16,12 +16,9 @@ builds:
       - -s -w
 
 archives:
-  - format: tar.gz
-    name_template: >-
+  - name_template: >-
       {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
-    format_overrides:
-      - goos: windows
-        format: zip
+    formats: [tar.gz]
 
 checksum:
   name_template: checksums.txt
@@ -46,13 +43,12 @@ brews:
     description: "Virtual bash shell implemented in Go with in-memory filesystem"
     license: MIT
     skip_upload: false
-    tap:
+    repository:
       owner: amjadjibon
       name: homebrew-memsh
       branch: main
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
     test: |
       system "#{bin}/memsh", "--version"
-    folder: Formula
     install: |
       bin.install "memsh"
