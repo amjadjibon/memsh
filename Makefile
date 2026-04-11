@@ -53,6 +53,7 @@ release:
 		git add -A; \
 		git commit -m "chore: prepare for release $(TAG)"; \
 		echo "Pushing changes to origin..."; \
+		git pull origin main --rebase; \
 		git push origin main; \
 		echo "✅ Changes pushed to repository"; \
 	else \
@@ -71,6 +72,7 @@ release:
 	@mkdir -p homebrew-memsh/Casks
 	@cp dist/homebrew/Casks/memsh.rb homebrew-memsh/Casks/
 	@cd homebrew-memsh && \
+		git pull origin main --rebase; \
 		if [ -n "$$(git status --porcelain Casks/memsh.rb)" ]; then \
 			git add Casks/memsh.rb; \
 			git commit -m "Update memsh cask to $(TAG)"; \
