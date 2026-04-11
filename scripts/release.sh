@@ -163,11 +163,16 @@ echo -e "${BLUE}→ Updating homebrew-memsh submodule reference...${NC}"
 if [ "$DRY_RUN" = false ]; then
     if [ -d "homebrew-memsh" ] && [ -f "homebrew-memsh/.git" ]; then
         cd homebrew-memsh
-        git pull origin main
+        echo -e "${BLUE}  → Fetching latest changes...${NC}"
+        git fetch origin main
+        echo -e "${BLUE}  → Resetting to origin/main...${NC}"
+        git reset --hard origin/main
         cd ..
+        echo -e "${BLUE}  → Adding submodule update...${NC}"
         git add homebrew-memsh
         if [ -n "$(git status --porcelain homebrew-memsh)" ]; then
             git commit -m "chore: update homebrew-memsh submodule for $TAG"
+            echo -e "${BLUE}  → Pushing submodule update...${NC}"
             git push origin main
             echo -e "${GREEN}✓ Submodule reference updated${NC}"
         else
