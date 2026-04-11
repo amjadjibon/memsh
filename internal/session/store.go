@@ -11,6 +11,7 @@
 package session
 
 import (
+	"slices"
 	"sync"
 	"time"
 
@@ -143,14 +144,16 @@ func (st *Store) List() []Info {
 			LastUse:   e.LastUse.UTC().Format(time.RFC3339),
 		})
 	}
-	// Sort by last use descending
-	for i := 0; i < len(out); i++ {
-		for j := i + 1; j < len(out); j++ {
-			if out[j].LastUse > out[i].LastUse {
-				out[i], out[j] = out[j], out[i]
-			}
+
+	slices.SortFunc(out, func(a, b Info) int {
+		if a.LastUse > b.LastUse {
+			return -1
 		}
-	}
+		if a.LastUse < b.LastUse {
+			return 1
+		}
+		return 0
+	})
 	return out
 }
 
