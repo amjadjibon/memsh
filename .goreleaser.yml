@@ -47,7 +47,7 @@ homebrew_casks:
       owner: amjadjibon
       name: homebrew-memsh
       branch: main
-      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+      token: "{{ .Env.GITHUB_TOKEN }}"
     url:
       template: "https://github.com/amjadjibon/memsh/releases/download/{{ .Tag }}/{{ .ArtifactName }}"
     generate_completions_from_executable:
