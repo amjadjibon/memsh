@@ -28,9 +28,11 @@ func Run(ctx context.Context, cancel context.CancelFunc, ag *agent.Agent, modelN
 
 // ── tea messages ─────────────────────────────────────────────
 
-type agentInterruptMsg struct{ history []*schema.Message }
-type agentDoneMsg struct{ result string }
-type agentErrMsg struct{ err error }
+type (
+	agentInterruptMsg struct{ history []*schema.Message }
+	agentDoneMsg      struct{ result string }
+	agentErrMsg       struct{ err error }
+)
 
 // ── chat entries ─────────────────────────────────────────────
 
