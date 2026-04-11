@@ -61,6 +61,18 @@ release:
 	git push origin $(TAG)
 	@echo "Running goreleaser..."
 	goreleaser release --clean
+	@echo "Updating homebrew-memsh repository..."
+	@mkdir -p homebrew-memsh/Casks
+	@cp dist/homebrew/Casks/memsh.rb homebrew-memsh/Casks/
+	@cd homebrew-memsh && \
+		if [ -n "$$(git status --porcelain Casks/memsh.rb)" ]; then \
+			git add Casks/memsh.rb; \
+			git commit -m "Update memsh cask to $(TAG)"; \
+			git push origin main; \
+			echo "✅ Homebrew cask pushed to repository"; \
+		else \
+			echo "ℹ️  Homebrew cask already up to date"; \
+		fi
 	@echo ""
 	@echo "✅ Release $(TAG) created successfully!"
 	@echo "📦 GitHub Release: https://github.com/amjadjibon/memsh/releases/tag/$(TAG)"
@@ -80,6 +92,12 @@ release-dry-run:
 	@echo ""
 	@echo "✅ Dry-run complete! Check dist/ directory for generated artifacts."
 	@echo "📄 Generated cask: dist/homebrew/Casks/memsh.rb"
+	@echo ""
+	@echo "📋 What would happen on full release:"
+	@echo "   • Git tag $(TAG) would be created and pushed"
+	@echo "   • GitHub release would be published"
+	@echo "   • Homebrew cask would be copied to homebrew-memsh/Casks/memsh.rb"
+	@echo "   • Cask would be committed and pushed to homebrew-memsh repository"
 
 help:
 	@echo "memsh - Available commands:"
@@ -92,12 +110,20 @@ help:
 	@echo "  make test             - Run tests"
 	@echo "  make cover            - Generate coverage report"
 	@echo "  make lint             - Run go vet"
-	@echo "  make release TAG=v1.0.0      - Create and push release tag, run goreleaser"
+	@echo "  make release TAG=v1.0.0      - Create release, push tag, update homebrew tap"
 	@echo "  make release-dry-run TAG=v1.0.0  - Test goreleaser without pushing"
 	@echo "  make help             - Show this help message"
 	@echo ""
 	@echo "Release workflow:"
-	@echo "  1. make release-dry-run TAG=v1.0.0   # Test first (cleans dist/)"
-	@echo "  2. make release TAG=v1.0.0            # Create release (cleans dist/)"
+	@echo "  1. make release-dry-run TAG=v1.0.0   # Test first"
+	@echo "  2. make release TAG=v1.0.0            # Create release"
+	@echo ""
+	@echo "What make release does:"
+	@echo "  • Validates working directory is clean"
+	@echo "  • Cleans dist/ and build artifacts"
+	@echo "  • Creates and pushes git tag"
+	@echo "  • Runs goreleaser (builds + GitHub release)"
+	@echo "  • Copies cask to homebrew-memsh/Casks/"
+	@echo "  • Commits and pushes cask to tap repository"
 	@echo ""
 	@echo "Homebrew tap: https://github.com/amjadjibon/homebrew-memsh"
