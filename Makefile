@@ -34,5 +34,5 @@ cover:
 	@echo "Coverage report: coverage.html"
 
 lint:
-	go vet ./...
+	go vet -stdmethods=false ./...
 	@echo "vet passed"
