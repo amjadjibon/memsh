@@ -374,6 +374,55 @@ go test ./tests -run TestJq -v       # single suite
 go test ./pkg/shell/... -run TestName  # shell package tests
 ```
 
+## Development
+
+```bash
+# Build
+make build
+
+# Run tests
+make test
+
+# Run coverage report
+make cover
+
+# Lint
+make lint
+
+# Clean build artifacts
+make clean
+
+# View all available commands
+make help
+```
+
+### Creating a Release
+
+The project uses [GoReleaser](https://goreleaser.com/) for automated releases and Homebrew formula generation.
+
+```bash
+# 1. Test the release process (dry-run)
+make release-dry-run TAG=v1.0.0
+
+# 2. Create the actual release
+make release TAG=v1.0.0
+```
+
+The `make release` command will:
+1. Validate the working directory is clean
+2. Create and push a git tag
+3. Build binaries for all platforms (Linux, macOS, Windows × AMD64, ARM64)
+4. Create a GitHub Release with all binaries
+5. Generate and update the Homebrew formula in [`homebrew-memsh`](https://github.com/amjadjibon/homebrew-memsh)
+
+After release, users can install via:
+```bash
+brew tap amjadjibon/memsh
+brew install memsh
+```
+
+**Note:** Ensure `GITHUB_TOKEN` and `HOMEBREW_TAP_GITHUB_TOKEN` are set for goreleaser to push to the tap repository.
+
 ## Requirements
 
 - Go 1.26+
