@@ -14,6 +14,11 @@ builds:
       - arm64
     ldflags:
       - -s -w
+    hooks:
+      post:
+        - cmd: bash -c 'if [ "{{ .Os }}" = "darwin" ]; then codesign --force --deep --sign - {{ .Path }} || true; fi'
+          env:
+            - CGO_ENABLED=0
 
 archives:
   - name_template: >-
@@ -53,3 +58,17 @@ homebrew_casks:
     generate_completions_from_executable:
       executable: "memsh"
       shell_parameter_format: cobra
+
+signs:
+  - artifacts: binary
+    ids:
+      - darwin-amd64
+      - darwin-arm64
+    cmd: codesign
+    args:
+      - "--force"
+      - "--deep"
+      - "--sign"
+      - "-"
+      - "${artifact}"
+    output: true
