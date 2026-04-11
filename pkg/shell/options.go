@@ -84,6 +84,13 @@ func WithWASMEnabled(enabled bool) Option {
 // discovery (/memsh/plugins/ and ~/.memsh/plugins/).
 // When the list is non-empty, only plugins whose names appear in it are loaded.
 // Plugins registered explicitly via WithPlugin or WithPluginBytes are unaffected.
+//
+// Precedence note: WithPluginFilter only gates filesystem discovery, which runs
+// after all options are applied. WithDisabledPlugins removes already-registered
+// native plugins during option application but does not prevent a same-named WASM
+// plugin from being loaded later by discovery. If both options name the same plugin
+// and you need to suppress it entirely, use WithDisabledPlugins and do NOT include
+// that name in the filter list (i.e. leave it out of the allowlist).
 func WithPluginFilter(names []string) Option {
 	return func(s *Shell) {
 		s.pluginFilter = make(map[string]struct{}, len(names))
@@ -120,8 +127,13 @@ func WithAliases(aliases map[string]string) Option {
 }
 
 // WithDisabledPlugins removes the named plugins from the shell.
-// Works for both native (builtin) and WASM plugins.
-// Applied after defaults, so it can suppress defaultNativePlugins entries.
+// Works for both native (builtin) and WASM plugins that are already registered
+// at the time the option is applied (i.e. defaultNativePlugins entries).
+//
+// Precedence note: WASM plugins loaded from the filesystem during discovery
+// (which happens after all options are applied) are NOT suppressed by this
+// option. To exclude a discovered WASM plugin, omit its name from the
+// WithPluginFilter allowlist instead of relying on WithDisabledPlugins.
 func WithDisabledPlugins(names ...string) Option {
 	return func(s *Shell) {
 		for _, name := range names {

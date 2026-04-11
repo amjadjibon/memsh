@@ -11,6 +11,7 @@
 package session
 
 import (
+	"context"
 	"slices"
 	"sync"
 	"time"
@@ -39,13 +40,16 @@ type Store struct {
 }
 
 // New creates a new session store with the given TTL and max entries.
-func New(ttl time.Duration, maxEntries int) *Store {
+// The background reaper goroutine runs until ctx is cancelled, so callers
+// should pass a context tied to the server lifetime to avoid goroutine leaks
+// on shutdown.
+func New(ctx context.Context, ttl time.Duration, maxEntries int) *Store {
 	st := &Store{
 		entries:    make(map[string]*Entry),
 		ttl:        ttl,
 		maxEntries: maxEntries,
 	}
-	go st.reap()
+	go st.reap(ctx)
 	return st
 }
 
@@ -158,17 +162,23 @@ func (st *Store) List() []Info {
 }
 
 // reap removes sessions that have exceeded the TTL.
-func (st *Store) reap() {
+// It stops when ctx is cancelled, preventing a goroutine leak on server shutdown.
+func (st *Store) reap(ctx context.Context) {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
-	for range ticker.C {
-		st.mu.Lock()
-		for id, e := range st.entries {
-			if time.Since(e.LastUse) > st.ttl {
-				delete(st.entries, id)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			st.mu.Lock()
+			for id, e := range st.entries {
+				if time.Since(e.LastUse) > st.ttl {
+					delete(st.entries, id)
+				}
 			}
+			st.mu.Unlock()
 		}
-		st.mu.Unlock()
 	}
 }
 
