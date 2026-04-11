@@ -39,3 +39,20 @@ release:
   github:
     owner: amjadjibon
     name: memsh
+
+brews:
+  - name: memsh
+    homepage: https://github.com/amjadjibon/memsh
+    description: "Virtual bash shell implemented in Go with in-memory filesystem"
+    license: MIT
+    skip_upload: false
+    tap:
+      owner: amjadjibon
+      name: homebrew-memsh
+      branch: main
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    test: |
+      system "#{bin}/memsh", "--version"
+    folder: Formula
+    install: |
+      bin.install "memsh"

@@ -20,6 +20,13 @@ Shell parsing and interpretation is handled by [mvdan.cc/sh/v3](https://github.c
 
 ## Installation
 
+### Homebrew
+
+```bash
+brew tap amjadjibon/memsh
+brew install memsh
+```
+
 ### Go Install
 
 ```bash
