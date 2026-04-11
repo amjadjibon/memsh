@@ -41,6 +41,8 @@ type Shell struct {
 	builtins      map[string]BuiltinFunc
 	nativePlugins map[string]plugins.Plugin
 	fds           map[uint32]afero.File
+	nextFd        uint32
+	freeFds       []uint32
 
 	wasmEnabled       bool
 	allowExternalCmds bool
@@ -99,6 +101,7 @@ func New(opts ...Option) (*Shell, error) {
 		builtins:      make(map[string]BuiltinFunc),
 		nativePlugins: make(map[string]plugins.Plugin),
 		fds:           make(map[uint32]afero.File),
+		nextFd:        3,
 		compiled:      make(map[string]wazero.CompiledModule),
 		aliases:       make(map[string]string),
 		wasmEnabled:   true,

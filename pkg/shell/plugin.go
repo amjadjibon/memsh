@@ -367,15 +367,17 @@ type nopWriteCloser struct{ io.Writer }
 
 func (nopWriteCloser) Close() error { return nil }
 
-// fd table helpers.
-
 func (s *Shell) allocFd(f afero.File) uint32 {
-	for i := uint32(3); ; i++ {
-		if _, exists := s.fds[i]; !exists {
-			s.fds[i] = f
-			return i
-		}
+	var fd uint32
+	if n := len(s.freeFds); n > 0 {
+		fd = s.freeFds[n-1]
+		s.freeFds = s.freeFds[:n-1]
+	} else {
+		fd = s.nextFd
+		s.nextFd++
 	}
+	s.fds[fd] = f
+	return fd
 }
 
 func (s *Shell) getFd(fd uint32) afero.File {
@@ -386,5 +388,6 @@ func (s *Shell) closeFd(fd uint32) {
 	if f, ok := s.fds[fd]; ok {
 		f.Close()
 		delete(s.fds, fd)
+		s.freeFds = append(s.freeFds, fd)
 	}
 }
