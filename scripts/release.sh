@@ -157,32 +157,58 @@ else
     goreleaser release --skip=publish,validate --clean
 fi
 
-# Update homebrew-memsh submodule reference
+# Manually push cask to homebrew-memsh repository
 echo ""
-echo -e "${BLUE}→ Updating homebrew-memsh submodule reference...${NC}"
+echo -e "${BLUE}→ Pushing cask to homebrew-memsh repository...${NC}"
 if [ "$DRY_RUN" = false ]; then
-    if [ -d "homebrew-memsh" ] && [ -f "homebrew-memsh/.git" ]; then
-        cd homebrew-memsh
-        echo -e "${BLUE}  → Fetching latest changes...${NC}"
-        git fetch origin main
-        echo -e "${BLUE}  → Resetting to origin/main...${NC}"
-        git reset --hard origin/main
-        cd ..
-        echo -e "${BLUE}  → Adding submodule update...${NC}"
-        git add homebrew-memsh
-        if [ -n "$(git status --porcelain homebrew-memsh)" ]; then
-            git commit -m "chore: update homebrew-memsh submodule for $TAG"
-            echo -e "${BLUE}  → Pushing submodule update...${NC}"
-            git push origin main
-            echo -e "${GREEN}✓ Submodule reference updated${NC}"
+    if [ -f "dist/homebrew/Casks/memsh.rb" ]; then
+        if [ -d "homebrew-memsh" ] && [ -f "homebrew-memsh/.git" ]; then
+            # Create Casks directory if it doesn't exist
+            mkdir -p homebrew-memsh/Casks
+
+            # Copy the generated cask
+            cp dist/homebrew/Casks/memsh.rb homebrew-memsh/Casks/
+
+            # Go into homebrew-memsh directory
+            cd homebrew-memsh
+
+            # Fetch and reset to avoid any divergent branches
+            echo -e "${BLUE}  → Syncing with remote...${NC}"
+            git fetch origin main
+            git reset --hard origin/main
+
+            # Add and commit the cask
+            echo -e "${BLUE}  → Committing cask...${NC}"
+            git add Casks/memsh.rb
+
+            if [ -n "$(git status --porcelain Casks/memsh.rb)" ]; then
+                git commit -m "Update memsh cask to $TAG"
+                echo -e "${BLUE}  → Pushing to homebrew-memsh...${NC}"
+                git push origin main
+                echo -e "${GREEN}✓ Cask pushed to homebrew-memsh${NC}"
+            else
+                echo -e "${YELLOW}ℹ️  Cask already up to date${NC}"
+            fi
+
+            # Go back to main repo
+            cd ..
+
+            # Update submodule reference in main repo
+            echo -e "${BLUE}→ Updating submodule reference in main repo...${NC}"
+            git add homebrew-memsh
+            if [ -n "$(git status --porcelain homebrew-memsh)" ]; then
+                git commit --amend --no-edit --no-verify
+                git push origin main --force-with-lease
+                echo -e "${GREEN}✓ Submodule reference updated${NC}"
+            fi
         else
-            echo -e "${YELLOW}ℹ️  Submodule reference already up to date${NC}"
+            echo -e "${YELLOW}⚠️  homebrew-memsh submodule not found, skipping cask push${NC}"
         fi
     else
-        echo -e "${YELLOW}⚠️  homebrew-memsh submodule not found, skipping update${NC}"
+        echo -e "${YELLOW}⚠️  Cask file not found at dist/homebrew/Casks/memsh.rb${NC}"
     fi
 else
-    echo -e "${YELLOW}[DRY-RUN] Would update homebrew-memsh submodule reference${NC}"
+    echo -e "${YELLOW}[DRY-RUN] Would push cask to homebrew-memsh${NC}"
 fi
 
 # Summary
