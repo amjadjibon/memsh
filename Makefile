@@ -52,6 +52,9 @@ release:
 		echo "Error: Working directory is not clean. Commit or stash changes first."; \
 		exit 1; \
 	fi
+	@echo "Cleaning dist directory..."
+	$(MAKE) clean
+	rm -rf dist/
 	@echo "Creating tag $(TAG)..."
 	git tag -a $(TAG) -m "Release $(TAG)"
 	@echo "Pushing tag to origin..."
@@ -61,7 +64,7 @@ release:
 	@echo ""
 	@echo "✅ Release $(TAG) created successfully!"
 	@echo "📦 GitHub Release: https://github.com/amjadjibon/memsh/releases/tag/$(TAG)"
-	@echo "🍺 Homebrew formula updated in: homebrew-memsh/Formula/memsh.rb"
+	@echo "🍺 Homebrew cask updated in: homebrew-memsh/Casks/memsh.rb"
 
 release-dry-run:
 	@if [ -z "$(TAG)" ]; then \
@@ -69,12 +72,14 @@ release-dry-run:
 		exit 1; \
 	fi
 	@echo "🧪 Dry-run release for tag: $(TAG)"
+	@echo "Cleaning dist directory..."
+	rm -rf dist/
 	@echo "Skipping git tag creation and push..."
 	@echo "Running goreleaser in test mode..."
 	goreleaser release --skip=publish,validate --clean
 	@echo ""
 	@echo "✅ Dry-run complete! Check dist/ directory for generated artifacts."
-	@echo "📄 Generated formula: dist/homebrew/memsh.rb"
+	@echo "📄 Generated cask: dist/homebrew/Casks/memsh.rb"
 
 help:
 	@echo "memsh - Available commands:"
@@ -92,7 +97,7 @@ help:
 	@echo "  make help             - Show this help message"
 	@echo ""
 	@echo "Release workflow:"
-	@echo "  1. make release-dry-run TAG=v1.0.0   # Test first"
-	@echo "  2. make release TAG=v1.0.0            # Create release"
+	@echo "  1. make release-dry-run TAG=v1.0.0   # Test first (cleans dist/)"
+	@echo "  2. make release TAG=v1.0.0            # Create release (cleans dist/)"
 	@echo ""
 	@echo "Homebrew tap: https://github.com/amjadjibon/homebrew-memsh"

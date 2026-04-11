@@ -398,7 +398,7 @@ make help
 
 ### Creating a Release
 
-The project uses [GoReleaser](https://goreleaser.com/) for automated releases and Homebrew formula generation.
+The project uses [GoReleaser](https://goreleaser.com/) for automated releases and Homebrew cask generation.
 
 ```bash
 # 1. Test the release process (dry-run)
@@ -409,11 +409,12 @@ make release TAG=v1.0.0
 ```
 
 The `make release` command will:
-1. Validate the working directory is clean
-2. Create and push a git tag
-3. Build binaries for all platforms (Linux, macOS, Windows × AMD64, ARM64)
-4. Create a GitHub Release with all binaries
-5. Generate and update the Homebrew formula in [`homebrew-memsh`](https://github.com/amjadjibon/homebrew-memsh)
+1. **Clean the `dist/` directory** (removes old build artifacts)
+2. Validate the working directory is clean
+3. Create and push a git tag
+4. Build binaries for all platforms (Linux, macOS, Windows × AMD64, ARM64)
+5. Create a GitHub Release with all binaries
+6. Generate and update the Homebrew cask in [`homebrew-memsh`](https://github.com/amjadjibon/homebrew-memsh)
 
 After release, users can install via:
 ```bash

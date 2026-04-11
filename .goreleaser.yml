@@ -37,7 +37,7 @@ release:
     owner: amjadjibon
     name: memsh
 
-brews:
+homebrew_casks:
   - name: memsh
     homepage: https://github.com/amjadjibon/memsh
     description: "Virtual bash shell implemented in Go with in-memory filesystem"
@@ -48,7 +48,8 @@ brews:
       name: homebrew-memsh
       branch: main
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
-    test: |
-      system "#{bin}/memsh", "--version"
-    install: |
-      bin.install "memsh"
+    url:
+      template: "https://github.com/amjadjibon/memsh/releases/download/{{ .Tag }}/{{ .ArtifactName }}"
+    generate_completions_from_executable:
+      executable: "memsh"
+      shell_parameter_format: cobra
