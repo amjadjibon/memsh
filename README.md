@@ -409,12 +409,13 @@ make release TAG=v1.0.0
 ```
 
 The `make release` command will:
-1. **Clean the `dist/` directory** (removes old build artifacts)
-2. Validate the working directory is clean
-3. Create and push a git tag
-4. Build binaries for all platforms (Linux, macOS, Windows × AMD64, ARM64)
-5. Create a GitHub Release with all binaries
-6. Generate and update the Homebrew cask in [`homebrew-memsh`](https://github.com/amjadjibon/homebrew-memsh)
+1. **Commit and push any uncommitted changes** (prepares for release)
+2. **Clean the `dist/` directory** (removes old build artifacts)
+3. Clean build artifacts (bin/ and *.wasm files)
+4. Create and push a git tag
+5. Build binaries for all platforms (Linux, macOS, Windows × AMD64, ARM64)
+6. Create a GitHub Release with all binaries
+7. Generate and push the Homebrew cask to [`homebrew-memsh`](https://github.com/amjadjibon/homebrew-memsh)
 
 After release, users can install via:
 ```bash
@@ -422,7 +423,7 @@ brew tap amjadjibon/memsh
 brew install memsh
 ```
 
-**Note:** Ensure `GITHUB_TOKEN` and `HOMEBREW_TAP_GITHUB_TOKEN` are set for goreleaser to push to the tap repository.
+**Note:** Ensure `GITHUB_TOKEN` is set for goreleaser to create releases and push to repositories.
 
 ## Requirements
 

@@ -49,8 +49,14 @@ release:
 	fi
 	@echo "Checking for uncommitted changes..."
 	@if [ -n "$$(git status --porcelain)" ]; then \
-		echo "Error: Working directory is not clean. Commit or stash changes first."; \
-		exit 1; \
+		echo "Found uncommitted changes. Committing and pushing..."; \
+		git add -A; \
+		git commit -m "chore: prepare for release $(TAG)"; \
+		echo "Pushing changes to origin..."; \
+		git push origin main; \
+		echo "✅ Changes pushed to repository"; \
+	else \
+		echo "Working directory is clean"; \
 	fi
 	@echo "Cleaning dist directory..."
 	$(MAKE) clean
@@ -94,6 +100,7 @@ release-dry-run:
 	@echo "📄 Generated cask: dist/homebrew/Casks/memsh.rb"
 	@echo ""
 	@echo "📋 What would happen on full release:"
+	@echo "   • Uncommitted changes would be committed and pushed"
 	@echo "   • Git tag $(TAG) would be created and pushed"
 	@echo "   • GitHub release would be published"
 	@echo "   • Homebrew cask would be copied to homebrew-memsh/Casks/memsh.rb"
@@ -110,7 +117,7 @@ help:
 	@echo "  make test             - Run tests"
 	@echo "  make cover            - Generate coverage report"
 	@echo "  make lint             - Run go vet"
-	@echo "  make release TAG=v1.0.0      - Create release, push tag, update homebrew tap"
+	@echo "  make release TAG=v1.0.0      - Create release (commits, pushes, updates tap)"
 	@echo "  make release-dry-run TAG=v1.0.0  - Test goreleaser without pushing"
 	@echo "  make help             - Show this help message"
 	@echo ""
@@ -119,7 +126,7 @@ help:
 	@echo "  2. make release TAG=v1.0.0            # Create release"
 	@echo ""
 	@echo "What make release does:"
-	@echo "  • Validates working directory is clean"
+	@echo "  • Commits and pushes any uncommitted changes"
 	@echo "  • Cleans dist/ and build artifacts"
 	@echo "  • Creates and pushes git tag"
 	@echo "  • Runs goreleaser (builds + GitHub release)"
