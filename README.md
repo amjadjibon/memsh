@@ -345,6 +345,99 @@ Sessions are always enabled. Send `X-Session-ID: <id>` on `POST /run` to persist
 | `GET /session/{id}/snapshot` | Export session filesystem as JSON |
 | `POST /session/{id}/snapshot` | Import a snapshot (use `"new"` as id to create) |
 
+## LLM Integration
+
+memsh has two modes for connecting LLMs: an **MCP server** (any MCP-compatible client) and a built-in **agent** (interactive ReAct loop).
+
+### MCP Server (`memsh mcp`)
+
+The MCP server exposes a single `memsh` tool that lets any LLM execute bash commands in a sandboxed in-memory filesystem. The real OS is never touched.
+
+**Transports:**
+
+| Transport | Command | Use case |
+|---|---|---|
+| stdio (default) | `memsh mcp` | Claude Desktop, Claude Code CLI |
+| HTTP (MCP 2025-03-26+) | `memsh mcp --transport http --addr :8080` | Programmatic / multi-session |
+| SSE (legacy) | `memsh mcp --transport sse --addr :8080` | Legacy MCP clients |
+
+**Claude Desktop** (`~/Library/Application Support/Claude/claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "memsh": {
+      "command": "/usr/local/bin/memsh",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+**Claude Code CLI:**
+
+```bash
+claude mcp add memsh -- memsh mcp
+```
+
+**Other MCP clients** — start the HTTP transport and point your client at the endpoint:
+
+```bash
+memsh mcp --transport http --addr :8080
+# Connect to: http://localhost:8080/
+```
+
+**Tool behaviour:**
+- Tool name: `memsh`, input field: `command` (string)
+- The virtual filesystem **persists across calls** within a session — use it as a scratchpad
+- `exit` / `quit` are treated as success, not errors
+- Stdin is not available; commands that read stdin receive EOF
+- Returns command output + current working directory (`Cwd: /path`)
+- Per-call timeout (default 30 s, minimum 5 s): `memsh mcp --timeout 1m`
+- WASM plugins (Python/Ruby/PHP) disabled by default for fast startup: `memsh mcp --wasm`
+
+**Example tool call result:**
+```
+/home/user/data
+file1.txt  file2.txt
+
+Cwd: /home/user/data
+```
+
+### Built-in Agent (`memsh agent`)
+
+`memsh agent` runs a ReAct loop: the LLM thinks, calls the `memsh` tool, observes results, and repeats until the task is done. After each response it pauses for your review.
+
+Provider is inferred from the model name:
+
+| Model prefix | Provider | API key env var |
+|---|---|---|
+| `gpt-*` | OpenAI | `OPENAI_API_KEY` |
+| `claude-*` | Anthropic | `ANTHROPIC_API_KEY` |
+| `gemini-*` | Google | `GOOGLE_API_KEY` |
+| `grok-*` | xAI | `XAI_API_KEY` |
+| any | OpenAI-compatible | `--base-url` + `--api-key` |
+
+```bash
+# Interactive TUI (human-in-the-loop)
+memsh agent --model claude-opus-4-5
+memsh agent --model gpt-4o
+memsh agent --model gemini-2.0-flash
+memsh agent --model grok-3
+
+# Single query, non-interactive
+memsh agent --model claude-opus-4-5 \
+  --query "create a CSV of 10 random users and compute average age with awk"
+
+# With WASM plugins (Python/Ruby/PHP)
+memsh agent --model gpt-4o --wasm
+
+# Explicit API key and base URL (any OpenAI-compatible endpoint)
+memsh agent --model my-model --api-key sk-xxx --base-url https://my-provider/v1
+```
+
+The agent uses an isolated `afero.MemMapFs` — nothing written during the session touches your real filesystem.
+
 ## Configuration
 
 `~/.memsh/config.toml` is loaded at startup (missing file = defaults):
