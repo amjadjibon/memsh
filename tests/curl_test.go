@@ -188,6 +188,22 @@ func TestCurl(t *testing.T) {
 		}
 	})
 
+	t.Run("shell redirect > saves body to virtual FS", func(t *testing.T) {
+		fs := afero.NewMemMapFs()
+		var buf strings.Builder
+		s := NewTestShell(t, &buf, shell.WithFS(fs))
+		if err := s.Run(ctx, "curl "+srv.URL+"/hello > /out.txt"); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		data, err := afero.ReadFile(fs, "/out.txt")
+		if err != nil {
+			t.Fatalf("output file not created: %v", err)
+		}
+		if got := strings.TrimSpace(string(data)); got != "hello world" {
+			t.Errorf("file content %q, want %q", got, "hello world")
+		}
+	})
+
 	t.Run("pipe curl into wc", func(t *testing.T) {
 		var buf strings.Builder
 		s := NewTestShell(t, &buf, shell.WithFS(afero.NewMemMapFs()))
