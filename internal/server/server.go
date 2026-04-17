@@ -149,6 +149,7 @@ func (h *Handler) handleRun(w http.ResponseWriter, r *http.Request) {
 		}
 		execTimeout = t
 		opts = append(opts, shell.WithFS(entry.Fs), shell.WithCwd(entry.Cwd))
+		opts = append(opts, shell.WithNetworkUsage(entry.Network))
 	}
 	ctx := native.WithPagerMode(r.Context())
 	var cancel context.CancelFunc
@@ -181,7 +182,7 @@ func (h *Handler) handleRun(w http.ResponseWriter, r *http.Request) {
 
 	if sessionID != "" {
 		session.SaveAliases(ctx, sh)
-		h.Store.UpdateWithRuntime(sessionID, cwd, entry.RcLoaded || rcLoaded, elapsed)
+		h.Store.UpdateWithRuntimeAndNetwork(sessionID, cwd, entry.RcLoaded || rcLoaded, elapsed, sh.NetworkUsage())
 		if err := h.Limits.ValidateFS(entry.Fs); err != nil {
 			respError = err.Error()
 			if preRunSnap != nil {

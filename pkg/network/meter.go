@@ -33,6 +33,13 @@ func NewMeter(limits Limits) *Meter {
 	return &Meter{limits: limits}
 }
 
+func NewMeterFromUsage(limits Limits, usage Usage) *Meter {
+	return &Meter{
+		limits: limits,
+		usage:  usage,
+	}
+}
+
 func (m *Meter) Snapshot() Usage {
 	if m == nil {
 		return Usage{}

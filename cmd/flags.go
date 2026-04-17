@@ -5,6 +5,7 @@ import (
 	"net/netip"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/amjadjibon/memsh/pkg/network"
 	"github.com/spf13/pflag"
@@ -15,6 +16,10 @@ type networkFlagConfig struct {
 	AllowDomains []string
 	AllowCIDRs   []string
 	AllowPorts   []string
+	MaxRequests  int
+	MaxBytesSent int64
+	MaxBytesRecv int64
+	MaxRuntime   time.Duration
 }
 
 func addNetworkFlags(fs *pflag.FlagSet, cfg *networkFlagConfig) {
@@ -22,6 +27,10 @@ func addNetworkFlags(fs *pflag.FlagSet, cfg *networkFlagConfig) {
 	fs.StringSliceVar(&cfg.AllowDomains, "net-allow-domain", nil, "Allow outbound domain (repeatable). Supports wildcard prefix like *.example.com")
 	fs.StringSliceVar(&cfg.AllowCIDRs, "net-allow-cidr", nil, "Allow outbound CIDR (repeatable), e.g. 203.0.113.0/24")
 	fs.StringSliceVar(&cfg.AllowPorts, "net-allow-port", nil, "Allow outbound port (repeatable), e.g. 443")
+	fs.IntVar(&cfg.MaxRequests, "net-max-requests", 0, "Maximum outbound network requests per shell/session (0 = unlimited)")
+	fs.Int64Var(&cfg.MaxBytesSent, "net-max-bytes-sent", 0, "Maximum outbound network bytes sent per shell/session (0 = unlimited)")
+	fs.Int64Var(&cfg.MaxBytesRecv, "net-max-bytes-recv", 0, "Maximum outbound network bytes received per shell/session (0 = unlimited)")
+	fs.DurationVar(&cfg.MaxRuntime, "net-max-runtime", 0, "Maximum cumulative network runtime per shell/session (0 = unlimited)")
 }
 
 func parseNetworkPolicy(cfg networkFlagConfig) (network.Policy, error) {
@@ -77,4 +86,25 @@ func parseNetworkPolicy(cfg networkFlagConfig) (network.Policy, error) {
 		DenyPrivateRanges: true,
 	}
 	return policy, nil
+}
+
+func parseNetworkLimits(cfg networkFlagConfig) (network.Limits, error) {
+	if cfg.MaxRequests < 0 {
+		return network.Limits{}, fmt.Errorf("invalid --net-max-requests: must be >= 0")
+	}
+	if cfg.MaxBytesSent < 0 {
+		return network.Limits{}, fmt.Errorf("invalid --net-max-bytes-sent: must be >= 0")
+	}
+	if cfg.MaxBytesRecv < 0 {
+		return network.Limits{}, fmt.Errorf("invalid --net-max-bytes-recv: must be >= 0")
+	}
+	if cfg.MaxRuntime < 0 {
+		return network.Limits{}, fmt.Errorf("invalid --net-max-runtime: must be >= 0")
+	}
+	return network.Limits{
+		MaxRequests:      cfg.MaxRequests,
+		MaxBytesSent:     cfg.MaxBytesSent,
+		MaxBytesReceived: cfg.MaxBytesRecv,
+		MaxRuntime:       cfg.MaxRuntime,
+	}, nil
 }

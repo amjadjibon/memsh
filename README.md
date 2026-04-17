@@ -332,6 +332,7 @@ Installed runtimes are stored in `~/.memsh/plugins/*.wasm`.
 | `WithAliases(map)` | Pre-seed the alias table |
 | `WithNetworkPolicy(policy)` | Set outbound network policy (`off`, `allowlist`, `full`) |
 | `WithNetworkLimits(limits)` | Set network request/bytes/runtime limits |
+| `WithNetworkUsage(usage)` | Seed cumulative network usage (for restored sessions) |
 
 ## HTTP Server
 
@@ -347,7 +348,7 @@ Sessions are always enabled. Send `X-Session-ID: <id>` on `POST /run` to persist
 | --- | --- |
 | `GET /` | Web terminal UI |
 | `POST /run` | `{"script":"..."}` → `{"output":"...","cwd":"...","error":"..."}` |
-| `GET /sessions` | List active sessions |
+| `GET /sessions` | List active sessions (cwd, timestamps, runtime/network usage counters) |
 | `DELETE /session/{id}` | Destroy a session |
 | `GET /health` | `{"status":"ok","uptime":"...","sessions":N}` |
 | `POST /complete` | `{"input":"...","cursor":N}` → tab completion |
@@ -363,6 +364,10 @@ These flags work for both local `memsh` and `memsh serve`:
 --net-allow-domain <domain>    # repeatable, supports *.example.com
 --net-allow-cidr <cidr>        # repeatable, e.g. 203.0.113.0/24
 --net-allow-port <port>        # repeatable, e.g. 443
+--net-max-requests <n>         # 0 = unlimited
+--net-max-bytes-sent <n>       # 0 = unlimited
+--net-max-bytes-recv <n>       # 0 = unlimited
+--net-max-runtime <duration>   # 0 = unlimited, e.g. 30s
 ```
 
 Examples:
@@ -379,6 +384,22 @@ memsh --net-mode allowlist \
 ```
 
 If DNS fails (`lookup <host>: no such host`), that is environment/network resolution, not a policy deny. A policy deny returns explicit errors like `network disabled by policy` or `destination port ... is not allowed`.
+
+`GET /sessions` now includes usage counters:
+
+```json
+{
+  "id": "abc123",
+  "cwd": "/",
+  "created_at": "2026-04-17T08:00:00Z",
+  "last_use": "2026-04-17T08:01:00Z",
+  "runtime_ms": 1420,
+  "network_requests": 3,
+  "network_bytes_sent": 512,
+  "network_bytes_received": 4096,
+  "network_runtime_ms": 280
+}
+```
 
 ## LLM Integration
 

@@ -135,6 +135,7 @@ func handleSession(s gliderssh.Session, store *session.Store, baseOpts []shell.O
 			shell.WithFS(entry.Fs),
 			shell.WithCwd(entry.Cwd),
 			shell.WithStdIO(s, s, s.Stderr()),
+			shell.WithNetworkUsage(entry.Network),
 		)
 
 		sh, err := shell.New(opts...)
@@ -159,7 +160,7 @@ func handleSession(s gliderssh.Session, store *session.Store, baseOpts []shell.O
 		elapsed := time.Since(startedAt)
 		session.SaveAliases(ctx, sh)
 		newCwd := sh.Cwd()
-		store.UpdateWithRuntime(sessionID, newCwd, entry.RcLoaded || rcLoaded, elapsed)
+		store.UpdateWithRuntimeAndNetwork(sessionID, newCwd, entry.RcLoaded || rcLoaded, elapsed, sh.NetworkUsage())
 		if fsErr := limits.ValidateFS(entry.Fs); fsErr != nil {
 			if preRunSnap != nil {
 				if restoredFS, restoredCwd, restoreErr := shell.RestoreSnapshot(preRunSnap); restoreErr == nil {
@@ -247,6 +248,7 @@ func handleSession(s gliderssh.Session, store *session.Store, baseOpts []shell.O
 			shell.WithFS(entry.Fs),
 			shell.WithCwd(cwd),
 			shell.WithStdIO(strings.NewReader(""), &cmdOut, &cmdOut),
+			shell.WithNetworkUsage(entry.Network),
 		)
 
 		sh, shErr := shell.New(opts...)
@@ -265,7 +267,7 @@ func handleSession(s gliderssh.Session, store *session.Store, baseOpts []shell.O
 		newCwd := sh.Cwd()
 		sh.Close()
 
-		store.UpdateWithRuntime(sessionID, newCwd, true, elapsed)
+		store.UpdateWithRuntimeAndNetwork(sessionID, newCwd, true, elapsed, sh.NetworkUsage())
 		if fsErr := limits.ValidateFS(entry.Fs); fsErr != nil {
 			if preRunSnap != nil {
 				if restoredFS, restoredCwd, restoreErr := shell.RestoreSnapshot(preRunSnap); restoreErr == nil {

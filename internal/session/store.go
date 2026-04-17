@@ -21,6 +21,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/amjadjibon/memsh/pkg/network"
 	"github.com/amjadjibon/memsh/pkg/shell"
 	"github.com/spf13/afero"
 )
@@ -35,6 +36,7 @@ type Entry struct {
 	LastUse   time.Time
 	RcLoaded  bool // true after /.memshrc has been sourced for this session
 	Runtime   time.Duration
+	Network   network.Usage
 	CronMu    sync.Mutex // serialises concurrent cron job writes to /.cron_log
 }
 
@@ -117,6 +119,15 @@ func (st *Store) Update(id, cwd string, rcLoaded bool) {
 
 // UpdateWithRuntime updates session state and runtime accounting.
 func (st *Store) UpdateWithRuntime(id, cwd string, rcLoaded bool, runtimeDelta time.Duration) {
+	st.updateLocked(id, cwd, rcLoaded, runtimeDelta, false, network.Usage{})
+}
+
+// UpdateWithRuntimeAndNetwork updates session state and cumulative network usage.
+func (st *Store) UpdateWithRuntimeAndNetwork(id, cwd string, rcLoaded bool, runtimeDelta time.Duration, netUsage network.Usage) {
+	st.updateLocked(id, cwd, rcLoaded, runtimeDelta, true, netUsage)
+}
+
+func (st *Store) updateLocked(id, cwd string, rcLoaded bool, runtimeDelta time.Duration, setNetwork bool, netUsage network.Usage) {
 	st.mu.Lock()
 	defer st.mu.Unlock()
 	if e, ok := st.entries[id]; ok {
@@ -126,6 +137,9 @@ func (st *Store) UpdateWithRuntime(id, cwd string, rcLoaded bool, runtimeDelta t
 		}
 		if rcLoaded {
 			e.RcLoaded = true
+		}
+		if setNetwork {
+			e.Network = netUsage
 		}
 		e.LastUse = time.Now()
 		st.persistLocked(id, e)
@@ -143,6 +157,7 @@ func (st *Store) Replace(id string, fs afero.Fs, cwd string) {
 		e.Cwd = cwd
 		e.RcLoaded = false
 		e.Runtime = 0
+		e.Network = network.Usage{}
 		e.LastUse = now
 		st.persistLocked(id, e)
 		return
@@ -177,6 +192,11 @@ type Info struct {
 	Cwd       string `json:"cwd"`
 	CreatedAt string `json:"created_at"`
 	LastUse   string `json:"last_use"`
+	RuntimeMS int64  `json:"runtime_ms"`
+	NetReqs   int    `json:"network_requests"`
+	NetSent   int64  `json:"network_bytes_sent"`
+	NetRecv   int64  `json:"network_bytes_received"`
+	NetRunMS  int64  `json:"network_runtime_ms"`
 }
 
 // List returns all sessions sorted by last use (most recent first).
@@ -190,6 +210,11 @@ func (st *Store) List() []Info {
 			Cwd:       e.Cwd,
 			CreatedAt: e.CreatedAt.UTC().Format(time.RFC3339),
 			LastUse:   e.LastUse.UTC().Format(time.RFC3339),
+			RuntimeMS: e.Runtime.Milliseconds(),
+			NetReqs:   e.Network.Requests,
+			NetSent:   e.Network.BytesSent,
+			NetRecv:   e.Network.BytesReceived,
+			NetRunMS:  e.Network.Runtime.Milliseconds(),
 		})
 	}
 
@@ -268,6 +293,7 @@ func (st *Store) persistLocked(id string, e *Entry) {
 		LastUse:   e.LastUse,
 		RcLoaded:  e.RcLoaded,
 		RuntimeNS: e.Runtime.Nanoseconds(),
+		Network:   e.Network,
 		Snapshot:  snap,
 	}); err != nil {
 		log.Printf("session persistence write %s: %v", id, err)
@@ -339,6 +365,7 @@ func (st *Store) loadPersisted() error {
 			LastUse:   lastUse,
 			RcLoaded:  rec.RcLoaded,
 			Runtime:   time.Duration(rec.RuntimeNS),
+			Network:   rec.Network,
 		}
 	}
 	return nil
