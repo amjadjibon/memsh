@@ -19,6 +19,7 @@ import (
 	"golang.org/x/term"
 
 	"github.com/amjadjibon/memsh/internal/session"
+	"github.com/amjadjibon/memsh/pkg/network"
 	"github.com/amjadjibon/memsh/pkg/shell"
 )
 
@@ -82,20 +83,28 @@ var rootCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		netLimits, err := parseNetworkLimits(localNetFlags)
+		if err != nil {
+			return err
+		}
 		opts = append(opts, shell.WithNetworkPolicy(netPolicy))
+		opts = append(opts, shell.WithNetworkLimits(netLimits))
 
 		var runtimeUsed time.Duration
 		persistedRcLoaded := false
+		persistedNetUsage := network.Usage{}
 		if localStoreDir != "" && localSessionID != "" {
-			fs, cwd, rt, rcLoaded, loadErr := session.LoadShellSession(localStoreDir, localSessionID)
+			fs, cwd, rt, rcLoaded, netUsage, loadErr := session.LoadShellSession(localStoreDir, localSessionID)
 			if loadErr == nil {
 				opts = append(opts, shell.WithFS(fs), shell.WithCwd(cwd))
 				runtimeUsed = rt
 				persistedRcLoaded = rcLoaded
+				persistedNetUsage = netUsage
 			} else if !os.IsNotExist(loadErr) {
 				return fmt.Errorf("failed to load session %q: %w", localSessionID, loadErr)
 			}
 		}
+		opts = append(opts, shell.WithNetworkUsage(persistedNetUsage))
 
 		sh, err := shell.New(opts...)
 		if err != nil {
@@ -105,7 +114,7 @@ var rootCmd = &cobra.Command{
 			session.RestoreAliases(ctx, sh, sh.FS())
 			defer func() {
 				session.SaveAliases(ctx, sh)
-				if saveErr := session.SaveShellSession(localStoreDir, localSessionID, sh.FS(), sh.Cwd(), runtimeUsed, true); saveErr != nil {
+				if saveErr := session.SaveShellSession(localStoreDir, localSessionID, sh.FS(), sh.Cwd(), runtimeUsed, true, sh.NetworkUsage()); saveErr != nil {
 					fmt.Fprintf(os.Stderr, "memsh: failed to persist session %q: %v\n", localSessionID, saveErr)
 				}
 			}()

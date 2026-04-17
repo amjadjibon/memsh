@@ -132,6 +132,9 @@ func WithAliases(aliases map[string]string) Option {
 func WithNetworkPolicy(policy network.Policy) Option {
 	return func(s *Shell) {
 		s.networkPolicy = policy
+		if s.networkMeter == nil {
+			s.networkMeter = network.NewMeterFromUsage(s.networkLimits, s.networkUsage)
+		}
 		s.networkDialer = network.NewDialer(network.DialerConfig{
 			Policy: policy,
 			Meter:  s.networkMeter,
@@ -142,7 +145,20 @@ func WithNetworkPolicy(policy network.Policy) Option {
 // WithNetworkLimits sets per-shell network usage limits.
 func WithNetworkLimits(limits network.Limits) Option {
 	return func(s *Shell) {
-		s.networkMeter = network.NewMeter(limits)
+		s.networkLimits = limits
+		s.networkMeter = network.NewMeterFromUsage(s.networkLimits, s.networkUsage)
+		s.networkDialer = network.NewDialer(network.DialerConfig{
+			Policy: s.networkPolicy,
+			Meter:  s.networkMeter,
+		})
+	}
+}
+
+// WithNetworkUsage seeds cumulative network usage for a shell session.
+func WithNetworkUsage(usage network.Usage) Option {
+	return func(s *Shell) {
+		s.networkUsage = usage
+		s.networkMeter = network.NewMeterFromUsage(s.networkLimits, s.networkUsage)
 		s.networkDialer = network.NewDialer(network.DialerConfig{
 			Policy: s.networkPolicy,
 			Meter:  s.networkMeter,

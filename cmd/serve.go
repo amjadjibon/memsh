@@ -118,7 +118,12 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
+	netLimits, err := parseNetworkLimits(serveNetFlags)
+	if err != nil {
+		return err
+	}
 	baseOpts = append(baseOpts, shell.WithNetworkPolicy(netPolicy))
+	baseOpts = append(baseOpts, shell.WithNetworkLimits(netLimits))
 
 	// In server mode, do not inherit the host process's environment
 	// to prevent leaking secrets (API keys, DB URLs, etc.) to remote users.
@@ -195,6 +200,10 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	if netPolicy.Mode != network.ModeFull || len(netPolicy.AllowDomains) > 0 || len(netPolicy.AllowCIDRs) > 0 || len(netPolicy.AllowPorts) > 0 {
 		fmt.Fprintf(os.Stderr, "memsh serve: network policy active (mode=%s domains=%d cidrs=%d ports=%d)\n",
 			netPolicy.Mode, len(netPolicy.AllowDomains), len(netPolicy.AllowCIDRs), len(netPolicy.AllowPorts))
+	}
+	if netLimits.MaxRequests > 0 || netLimits.MaxBytesSent > 0 || netLimits.MaxBytesReceived > 0 || netLimits.MaxRuntime > 0 {
+		fmt.Fprintf(os.Stderr, "memsh serve: network limits active (max-requests=%d, max-bytes-sent=%d, max-bytes-recv=%d, max-runtime=%s)\n",
+			netLimits.MaxRequests, netLimits.MaxBytesSent, netLimits.MaxBytesReceived, netLimits.MaxRuntime)
 	}
 
 	// Start the cron scheduler. It aligns to the next minute boundary and then

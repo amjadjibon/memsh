@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/amjadjibon/memsh/pkg/network"
 	"github.com/amjadjibon/memsh/pkg/shell"
 	"github.com/spf13/afero"
 )
@@ -21,6 +22,7 @@ type persistedSession struct {
 	LastUse   time.Time       `json:"last_use"`
 	RcLoaded  bool            `json:"rc_loaded"`
 	RuntimeNS int64           `json:"runtime_ns"`
+	Network   network.Usage   `json:"network"`
 	Snapshot  *shell.Snapshot `json:"snapshot"`
 }
 
@@ -88,17 +90,17 @@ func readPersistedSession(dir, id string) (*persistedSession, error) {
 }
 
 // LoadShellSession restores one persisted shell session by id.
-func LoadShellSession(dir, id string) (afero.Fs, string, time.Duration, bool, error) {
+func LoadShellSession(dir, id string) (afero.Fs, string, time.Duration, bool, network.Usage, error) {
 	rec, err := readPersistedSession(dir, id)
 	if err != nil {
-		return nil, "", 0, false, err
+		return nil, "", 0, false, network.Usage{}, err
 	}
 	if rec.Snapshot == nil {
-		return nil, "", 0, false, fmt.Errorf("invalid persisted session: missing snapshot")
+		return nil, "", 0, false, network.Usage{}, fmt.Errorf("invalid persisted session: missing snapshot")
 	}
 	fs, cwd, err := shell.RestoreSnapshot(rec.Snapshot)
 	if err != nil {
-		return nil, "", 0, false, err
+		return nil, "", 0, false, network.Usage{}, err
 	}
 	if cwd == "" {
 		cwd = rec.Cwd
@@ -106,11 +108,11 @@ func LoadShellSession(dir, id string) (afero.Fs, string, time.Duration, bool, er
 	if cwd == "" {
 		cwd = "/"
 	}
-	return fs, cwd, time.Duration(rec.RuntimeNS), rec.RcLoaded, nil
+	return fs, cwd, time.Duration(rec.RuntimeNS), rec.RcLoaded, rec.Network, nil
 }
 
 // SaveShellSession saves one shell session to persistence storage.
-func SaveShellSession(dir, id string, fs afero.Fs, cwd string, runtime time.Duration, rcLoaded bool) error {
+func SaveShellSession(dir, id string, fs afero.Fs, cwd string, runtime time.Duration, rcLoaded bool, netUsage network.Usage) error {
 	if strings.TrimSpace(dir) == "" || strings.TrimSpace(id) == "" {
 		return nil
 	}
@@ -126,6 +128,7 @@ func SaveShellSession(dir, id string, fs afero.Fs, cwd string, runtime time.Dura
 		LastUse:   now,
 		RcLoaded:  rcLoaded,
 		RuntimeNS: runtime.Nanoseconds(),
+		Network:   netUsage,
 		Snapshot:  snap,
 	})
 }

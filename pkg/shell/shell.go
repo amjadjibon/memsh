@@ -60,6 +60,8 @@ type Shell struct {
 	realCwd     string
 
 	networkPolicy network.Policy
+	networkLimits network.Limits
+	networkUsage  network.Usage
 	networkMeter  *network.Meter
 	networkDialer *network.Dialer
 }
@@ -114,6 +116,8 @@ func New(opts ...Option) (*Shell, error) {
 		inheritEnv:    true,
 		realCwd:       "/",
 		networkPolicy: network.DefaultPolicy(),
+		networkLimits: network.Limits{},
+		networkUsage:  network.Usage{},
 	}
 
 	for _, p := range defaultNativePlugins() {
@@ -124,7 +128,7 @@ func New(opts ...Option) (*Shell, error) {
 		opt(s)
 	}
 	if s.networkMeter == nil {
-		s.networkMeter = network.NewMeter(network.Limits{})
+		s.networkMeter = network.NewMeterFromUsage(s.networkLimits, s.networkUsage)
 	}
 	if s.networkDialer == nil {
 		s.networkDialer = network.NewDialer(network.DialerConfig{
@@ -342,6 +346,14 @@ func (s *Shell) Cwd() string {
 
 func (s *Shell) FS() afero.Fs {
 	return s.fs
+}
+
+// NetworkUsage returns cumulative network usage tracked by this shell.
+func (s *Shell) NetworkUsage() network.Usage {
+	if s.networkMeter == nil {
+		return network.Usage{}
+	}
+	return s.networkMeter.Snapshot()
 }
 
 // Commands returns all command names known to this shell instance:
