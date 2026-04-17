@@ -8,6 +8,35 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Security model:** external OS commands are blocked by default. Only registered plugins can run. Opt-in via `WithAllowExternalCommands(true)`.
 
+## Repository Guidelines (Contributor Quick Guide)
+
+### Project Structure
+- `cmd/`: CLI subcommands and Cobra wiring.
+- `pkg/shell/`: core runtime, virtual FS integration, and command/plugin execution.
+- `pkg/shell/plugins/native/`: built-in command implementations.
+- `internal/`: session, server, REPL, config, and agent internals.
+- `tests/`: integration tests using in-memory FS helpers.
+- `web/`: static web terminal assets.
+
+### Build, Test, and Lint
+- `make build` builds `./bin/memsh`.
+- `make plugins` compiles WASM plugins.
+- `make test` runs `go test ./... -v -count=1`.
+- `make cover` writes `coverage.out` and `coverage.html`.
+- `make lint` runs `go vet`.
+
+### Style and Naming
+- Use `gofmt` formatting; prefer `goimports` for import cleanup.
+- Keep package names lowercase; exported identifiers in `CamelCase`.
+- Use descriptive, feature-based filenames (for example `snapshot.go`, `server.go`).
+- For commands/plugins, keep names lowercase and shell-like (`jq`, `grep`, `mktemp`).
+
+### Tests and PRs
+- Add/extend `*_test.go` files near changed code or in `tests/` for command behavior.
+- Prefer `tests.NewTestShell(...)` to test commands consistently.
+- Follow Conventional Commit prefixes: `feat:`, `fix:`, `refactor:`, `chore:`, `docs:`.
+- PRs should include a concise summary, linked issue(s), and test evidence (`make test`).
+
 ## Commands
 
 ```bash
