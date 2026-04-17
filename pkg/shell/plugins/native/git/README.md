@@ -103,9 +103,15 @@ repository with a storage and worktree both backed by the virtual FS.
   unchanged. Repositories that use symlinks will silently skip them.
 - **File modes**: `MemMapFs` does not persist execute bits; mode information
   stored in git objects may not round-trip exactly.
-- **Authentication**: `git clone` and (future) `fetch`/`push` use go-git's
-  default HTTP transport. Public HTTPS repos work; SSH and token auth are not
-  yet wired up.
+- **Authentication**: `git clone`, `fetch`, `pull`, `push`, and `ls-remote`
+  support HTTPS auth via environment variables:
+  - `GIT_HTTP_USERNAME` + `GIT_HTTP_PASSWORD`
+  - `GIT_USERNAME` + `GIT_PASSWORD`
+  - token-only: `GIT_HTTP_TOKEN`, `GIT_TOKEN`, `GITHUB_TOKEN`,
+    `GITLAB_TOKEN`, `BITBUCKET_TOKEN`
+  - optional token username override: `GIT_HTTP_TOKEN_USERNAME`,
+    `GIT_TOKEN_USERNAME`
+  SSH-key auth is still not wired up.
 - **`cd` in shell**: `mvdan.cc/sh` intercepts `cd` before the exec handler,
   so `git -C <path>` is the recommended way to target a virtual repo path
   when the shell's real cwd differs from the virtual repo root.

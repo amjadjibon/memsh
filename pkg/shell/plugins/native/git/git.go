@@ -67,7 +67,7 @@ func (GitPlugin) Run(ctx context.Context, args []string) error {
 
 	switch sub {
 	case "clone":
-		return cmdGitClone(hc.Stdout, hc.Stderr, fs, cwd, rest)
+		return cmdGitClone(hc.Stdout, hc.Stderr, fs, cwd, rest, sc.Env)
 	case "init":
 		return cmdGitInit(hc.Stdout, fs, cwd, rest)
 	case "add":
@@ -95,11 +95,11 @@ func (GitPlugin) Run(ctx context.Context, args []string) error {
 	case "merge":
 		return cmdGitMerge(hc.Stdout, hc.Stderr, fs, cwd, rest)
 	case "fetch":
-		return cmdGitFetch(hc.Stdout, hc.Stderr, fs, cwd, rest)
+		return cmdGitFetch(hc.Stdout, hc.Stderr, fs, cwd, rest, sc.Env)
 	case "pull":
-		return cmdGitPull(hc.Stdout, hc.Stderr, fs, cwd, rest)
+		return cmdGitPull(hc.Stdout, hc.Stderr, fs, cwd, rest, sc.Env)
 	case "push":
-		return cmdGitPush(hc.Stdout, hc.Stderr, fs, cwd, rest)
+		return cmdGitPush(hc.Stdout, hc.Stderr, fs, cwd, rest, sc.Env)
 	case "remote":
 		return cmdGitRemote(hc.Stdout, hc.Stderr, fs, cwd, rest)
 	case "tag":
@@ -131,7 +131,7 @@ func (GitPlugin) Run(ctx context.Context, args []string) error {
 	case "hash-object":
 		return cmdGitHashObject(hc.Stdout, hc.Stderr, fs, cwd, rest)
 	case "ls-remote":
-		return cmdGitLsRemote(hc.Stdout, hc.Stderr, fs, cwd, rest)
+		return cmdGitLsRemote(hc.Stdout, hc.Stderr, fs, cwd, rest, sc.Env)
 	case "config":
 		return cmdGitConfig(hc.Stdout, hc.Stderr, fs, cwd, rest)
 	default:

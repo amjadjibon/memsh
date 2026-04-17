@@ -32,7 +32,7 @@ func repoNameFromURL(rawURL string) string {
 // cmdGitClone clones a remote (or local) repository into the virtual FS.
 //
 //	git clone [--depth <n>] [-b <branch>] [--single-branch] [-n] [--no-checkout] <url> [<directory>]
-func cmdGitClone(w io.Writer, errW io.Writer, fs afero.Fs, cwd string, args []string) error {
+func cmdGitClone(w io.Writer, errW io.Writer, fs afero.Fs, cwd string, args []string, getEnv envLookup) error {
 	var (
 		rawURL       string
 		destArg      string
@@ -110,6 +110,7 @@ func cmdGitClone(w io.Writer, errW io.Writer, fs afero.Fs, cwd string, args []st
 		NoCheckout:   noCheckout,
 		SingleBranch: singleBranch,
 		Depth:        depth,
+		Auth:         authFromEnv(getEnv, rawURL),
 	}
 	if branch != "" {
 		cloneOpts.ReferenceName = plumbing.NewBranchReferenceName(branch)

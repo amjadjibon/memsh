@@ -142,7 +142,7 @@ func cmdGitRemote(w io.Writer, errW io.Writer, fs afero.Fs, cwd string, args []s
 // git fetch
 // ---------------------------------------------------------------------------
 
-func cmdGitFetch(w io.Writer, errW io.Writer, fs afero.Fs, cwd string, args []string) error {
+func cmdGitFetch(w io.Writer, errW io.Writer, fs afero.Fs, cwd string, args []string, getEnv envLookup) error {
 	repo, _, err := openRepo(fs, cwd)
 	if err != nil {
 		return err
@@ -167,10 +167,15 @@ func cmdGitFetch(w io.Writer, errW io.Writer, fs afero.Fs, cwd string, args []st
 		}
 	}
 
+	remoteURL := ""
+	if r, rErr := repo.Remote(remoteName); rErr == nil && len(r.Config().URLs) > 0 {
+		remoteURL = r.Config().URLs[0]
+	}
 	err = repo.Fetch(&gogit.FetchOptions{
 		RemoteName: remoteName,
 		Depth:      depth,
 		Progress:   w,
+		Auth:       authFromEnv(getEnv, remoteURL),
 	})
 	if err != nil && !errors.Is(err, gogit.NoErrAlreadyUpToDate) {
 		return fmt.Errorf("git fetch: %w", err)
@@ -186,7 +191,7 @@ func cmdGitFetch(w io.Writer, errW io.Writer, fs afero.Fs, cwd string, args []st
 // git pull
 // ---------------------------------------------------------------------------
 
-func cmdGitPull(w io.Writer, errW io.Writer, fs afero.Fs, cwd string, args []string) error {
+func cmdGitPull(w io.Writer, errW io.Writer, fs afero.Fs, cwd string, args []string, getEnv envLookup) error {
 	repo, _, err := openRepo(fs, cwd)
 	if err != nil {
 		return err
@@ -219,6 +224,9 @@ func cmdGitPull(w io.Writer, errW io.Writer, fs afero.Fs, cwd string, args []str
 		ReferenceName: branchName,
 		Progress:      w,
 	}
+	if r, rErr := repo.Remote(remoteName); rErr == nil && len(r.Config().URLs) > 0 {
+		pullOpts.Auth = authFromEnv(getEnv, r.Config().URLs[0])
+	}
 
 	err = wt.Pull(pullOpts)
 	if err != nil && !errors.Is(err, gogit.NoErrAlreadyUpToDate) {
@@ -235,7 +243,7 @@ func cmdGitPull(w io.Writer, errW io.Writer, fs afero.Fs, cwd string, args []str
 // git push
 // ---------------------------------------------------------------------------
 
-func cmdGitPush(w io.Writer, errW io.Writer, fs afero.Fs, cwd string, args []string) error {
+func cmdGitPush(w io.Writer, errW io.Writer, fs afero.Fs, cwd string, args []string, getEnv envLookup) error {
 	repo, _, err := openRepo(fs, cwd)
 	if err != nil {
 		return err
@@ -257,7 +265,12 @@ func cmdGitPush(w io.Writer, errW io.Writer, fs afero.Fs, cwd string, args []str
 				if remoteName == "origin" {
 					remoteName = args[i]
 				} else {
-					refSpecs = append(refSpecs, config.RefSpec(args[i]))
+					spec := args[i]
+					if strings.Contains(spec, ":") || strings.HasPrefix(spec, "+") || strings.HasPrefix(spec, "refs/") {
+						refSpecs = append(refSpecs, config.RefSpec(spec))
+					} else {
+						refSpecs = append(refSpecs, config.RefSpec("refs/heads/"+spec+":refs/heads/"+spec))
+					}
 				}
 			}
 		}
@@ -267,6 +280,9 @@ func cmdGitPush(w io.Writer, errW io.Writer, fs afero.Fs, cwd string, args []str
 		RemoteName: remoteName,
 		Force:      force,
 		Progress:   w,
+	}
+	if r, rErr := repo.Remote(remoteName); rErr == nil && len(r.Config().URLs) > 0 {
+		pushOpts.Auth = authFromEnv(getEnv, r.Config().URLs[0])
 	}
 	if tags {
 		pushOpts.RefSpecs = append(pushOpts.RefSpecs, config.RefSpec("refs/tags/*:refs/tags/*"))
@@ -290,7 +306,7 @@ func cmdGitPush(w io.Writer, errW io.Writer, fs afero.Fs, cwd string, args []str
 // git ls-remote
 // ---------------------------------------------------------------------------
 
-func cmdGitLsRemote(w io.Writer, errW io.Writer, fs afero.Fs, cwd string, args []string) error {
+func cmdGitLsRemote(w io.Writer, errW io.Writer, fs afero.Fs, cwd string, args []string, getEnv envLookup) error {
 	var urlOrName string
 	headsOnly := false
 	tagsOnly := false
@@ -328,7 +344,9 @@ func cmdGitLsRemote(w io.Writer, errW io.Writer, fs afero.Fs, cwd string, args [
 		URLs: []string{resolvedURL},
 	})
 
-	refs, err := remote.List(&gogit.ListOptions{})
+	refs, err := remote.List(&gogit.ListOptions{
+		Auth: authFromEnv(getEnv, resolvedURL),
+	})
 	if err != nil {
 		return fmt.Errorf("git ls-remote: %w", err)
 	}
