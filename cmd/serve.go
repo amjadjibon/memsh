@@ -27,6 +27,7 @@ import (
 	"github.com/spf13/cobra"
 	gossh "golang.org/x/crypto/ssh"
 
+	"github.com/amjadjibon/memsh/internal/session"
 	"github.com/amjadjibon/memsh/pkg/cron"
 	"github.com/amjadjibon/memsh/pkg/shell"
 	"github.com/amjadjibon/memsh/pkg/shell/plugins/native"
@@ -81,7 +82,8 @@ type sessionEntry struct {
 	cwd       string
 	createdAt time.Time
 	lastUse   time.Time
-	rcLoaded  bool       // true after /.memshrc has been sourced for this session
+	rcLoaded  bool // true after /.memshrc has been sourced for this session
+	runtime   time.Duration
 	cronMu    sync.Mutex // serialises concurrent cron job writes to /.cron_log
 }
 
@@ -131,11 +133,14 @@ func (st *sessionStore) get(id string) (*sessionEntry, bool) {
 // updateSession records the cwd after a request finishes so the next request
 // in the same session picks it up. Alias state is persisted in the virtual FS
 // via /.memsh_session_aliases, so it does not need a separate field here.
-func (st *sessionStore) updateSession(id, cwd string, rcLoaded bool) {
+func (st *sessionStore) updateSession(id, cwd string, rcLoaded bool, runtimeDelta time.Duration) {
 	st.mu.Lock()
 	defer st.mu.Unlock()
 	if e, ok := st.entries[id]; ok {
 		e.cwd = cwd
+		if runtimeDelta > 0 {
+			e.runtime += runtimeDelta
+		}
 		if rcLoaded {
 			e.rcLoaded = true
 		}
@@ -371,6 +376,9 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	corsOrigin, _ := cmd.Flags().GetString("cors-origin")
 	apiKey, _ := cmd.Flags().GetString("api-key")
 	maxSessions, _ := cmd.Flags().GetInt("max-sessions")
+	maxSessionFiles, _ := cmd.Flags().GetInt("session-max-files")
+	maxSessionBytes, _ := cmd.Flags().GetInt64("session-max-bytes")
+	maxSessionRuntime, _ := cmd.Flags().GetDuration("session-max-runtime")
 	sshEnabled, _ := cmd.Flags().GetBool("ssh")
 	sshAddr, _ := cmd.Flags().GetString("ssh-addr")
 	sshHostKey, _ := cmd.Flags().GetString("ssh-host-key")
@@ -383,6 +391,20 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	// Enforce a minimum timeout to prevent unbounded execution.
 	if timeout <= 0 {
 		timeout = minTimeout
+	}
+	if maxSessionFiles < 0 {
+		return fmt.Errorf("invalid --session-max-files: must be >= 0")
+	}
+	if maxSessionBytes < 0 {
+		return fmt.Errorf("invalid --session-max-bytes: must be >= 0")
+	}
+	if maxSessionRuntime < 0 {
+		return fmt.Errorf("invalid --session-max-runtime: must be >= 0")
+	}
+	limits := session.Limits{
+		MaxFiles:   maxSessionFiles,
+		MaxBytes:   maxSessionBytes,
+		MaxRuntime: maxSessionRuntime,
 	}
 
 	// Only enable auth if an API key was explicitly provided.
@@ -427,12 +449,6 @@ func runServe(cmd *cobra.Command, _ []string) error {
 			return
 		}
 
-		ctx := r.Context()
-		ctx = native.WithPagerMode(ctx)
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, timeout)
-		defer cancel()
-
 		var out strings.Builder
 		opts := make([]shell.Option, len(baseOpts)+1)
 		copy(opts, baseOpts)
@@ -440,6 +456,8 @@ func runServe(cmd *cobra.Command, _ []string) error {
 
 		sessionID := r.Header.Get("X-Session-ID")
 		var entry *sessionEntry
+		execTimeout := timeout
+		var preRunSnap *shell.Snapshot
 		if sessionID != "" {
 			var ok bool
 			entry, ok = store.get(sessionID)
@@ -449,8 +467,35 @@ func runServe(cmd *cobra.Command, _ []string) error {
 				})
 				return
 			}
+			if err := limits.ValidateRuntime(entry.runtime); err != nil {
+				writeJSON(w, http.StatusTooManyRequests, runResponse{Error: err.Error(), Cwd: entry.cwd})
+				return
+			}
+			if err := limits.ValidateFS(entry.fs); err != nil {
+				writeJSON(w, http.StatusTooManyRequests, runResponse{Error: err.Error(), Cwd: entry.cwd})
+				return
+			}
+			if limits.HasFSLimits() {
+				snap, err := shell.TakeSnapshot(entry.fs, entry.cwd)
+				if err != nil {
+					log.Printf("memsh serve: snapshot before run failed: %v", err)
+					writeJSON(w, http.StatusInternalServerError, runResponse{Error: "internal server error", Cwd: entry.cwd})
+					return
+				}
+				preRunSnap = snap
+			}
+			t, err := limits.EffectiveTimeout(timeout, entry.runtime, minTimeout)
+			if err != nil {
+				writeJSON(w, http.StatusTooManyRequests, runResponse{Error: err.Error(), Cwd: entry.cwd})
+				return
+			}
+			execTimeout = t
 			opts = append(opts, shell.WithFS(entry.fs), shell.WithCwd(entry.cwd))
 		}
+		ctx := native.WithPagerMode(r.Context())
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, execTimeout)
+		defer cancel()
 
 		sh, err := shell.New(opts...)
 		if err != nil {
@@ -470,12 +515,31 @@ func runServe(cmd *cobra.Command, _ []string) error {
 			}
 		}
 
+		startedAt := time.Now()
 		runErr := sh.Run(ctx, req.Script)
+		elapsed := time.Since(startedAt)
 		cwd := sh.Cwd()
+		respError := ""
 
 		if sessionID != "" {
 			saveAliases(ctx, sh)
-			store.updateSession(sessionID, cwd, entry.rcLoaded || rcLoaded)
+			store.updateSession(sessionID, cwd, entry.rcLoaded || rcLoaded, elapsed)
+
+			if err := limits.ValidateFS(entry.fs); err != nil {
+				respError = err.Error()
+				if preRunSnap != nil {
+					if restoredFS, restoredCwd, restoreErr := shell.RestoreSnapshot(preRunSnap); restoreErr == nil {
+						store.replace(sessionID, restoredFS, restoredCwd)
+						entry.fs = restoredFS
+						cwd = restoredCwd
+					} else {
+						log.Printf("memsh serve: snapshot restore failed after limit error: %v", restoreErr)
+					}
+				}
+			}
+			if err := limits.ValidateRuntime(entry.runtime); err != nil {
+				respError = err.Error()
+			}
 		}
 
 		output := out.String()
@@ -487,10 +551,17 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		resp := runResponse{Output: output, Pager: pager, Cwd: cwd}
 		if runErr != nil && !errors.Is(runErr, shell.ErrExit) {
 			if errors.Is(runErr, context.DeadlineExceeded) {
-				resp.Error = "timeout: execution exceeded " + timeout.String()
+				if sessionID != "" && limits.MaxRuntime > 0 && entry.runtime >= limits.MaxRuntime {
+					resp.Error = fmt.Sprintf("session runtime limit exceeded: used %s, max %s", entry.runtime.Round(time.Millisecond), limits.MaxRuntime)
+				} else {
+					resp.Error = "timeout: execution exceeded " + execTimeout.String()
+				}
 			} else {
 				resp.Error = runErr.Error()
 			}
+		}
+		if respError != "" {
+			resp.Error = respError
 		}
 		writeJSON(w, http.StatusOK, resp)
 	})
@@ -550,6 +621,10 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		}
 		fs, cwd, err := shell.RestoreSnapshot(snap)
 		if err != nil {
+			writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": err.Error()})
+			return
+		}
+		if err := limits.ValidateFS(fs); err != nil {
 			writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": err.Error()})
 			return
 		}
@@ -634,7 +709,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	var sshSrv *gliderssh.Server
 	if sshEnabled {
 		var sshErr error
-		sshSrv, sshErr = buildSSHServer(sshAddr, apiKey, sshHostKey, store, baseOpts, timeout)
+		sshSrv, sshErr = buildSSHServer(sshAddr, apiKey, sshHostKey, store, baseOpts, timeout, limits)
 		if sshErr != nil {
 			return fmt.Errorf("memsh serve: SSH: %w", sshErr)
 		}
@@ -659,6 +734,10 @@ func runServe(cmd *cobra.Command, _ []string) error {
 
 	fmt.Fprintf(os.Stderr, "memsh serve: listening on %s  (session TTL %s, max sessions %d, timeout %s)\n",
 		addr, ttl, maxSessions, timeout)
+	if limits.MaxFiles > 0 || limits.MaxBytes > 0 || limits.MaxRuntime > 0 {
+		fmt.Fprintf(os.Stderr, "memsh serve: session limits active (max-files=%d, max-bytes=%d, max-runtime=%s)\n",
+			limits.MaxFiles, limits.MaxBytes, limits.MaxRuntime)
+	}
 
 	// Start the cron scheduler. It aligns to the next minute boundary and then
 	// ticks every minute, running matching jobs for all active sessions.
@@ -675,7 +754,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 // buildSSHServer creates a gliderlabs SSH server backed by the memsh session
 // store.  Each connection is identified by its SSH username, which is used as
 // the session ID so that the virtual filesystem persists across reconnects.
-func buildSSHServer(addr, apiKey, hostKeyFile string, store *sessionStore, baseOpts []shell.Option, timeout time.Duration) (*gliderssh.Server, error) {
+func buildSSHServer(addr, apiKey, hostKeyFile string, store *sessionStore, baseOpts []shell.Option, timeout time.Duration, limits session.Limits) (*gliderssh.Server, error) {
 	signer, err := loadOrGenerateHostKey(hostKeyFile)
 	if err != nil {
 		return nil, err
@@ -685,7 +764,7 @@ func buildSSHServer(addr, apiKey, hostKeyFile string, store *sessionStore, baseO
 		Addr:        addr,
 		HostSigners: []gliderssh.Signer{signer},
 		Handler: func(s gliderssh.Session) {
-			handleSSHSession(s, store, baseOpts, timeout)
+			handleSSHSession(s, store, baseOpts, timeout, limits)
 		},
 	}
 
@@ -712,7 +791,7 @@ func buildSSHServer(addr, apiKey, hostKeyFile string, store *sessionStore, baseO
 // buffering.  sshReadLine reads characters, echoes them, and handles backspace /
 // Ctrl-C / Ctrl-D so the user gets a proper editing experience.  Command output
 // has bare LF translated to CR+LF so it renders correctly in the remote terminal.
-func handleSSHSession(s gliderssh.Session, store *sessionStore, baseOpts []shell.Option, timeout time.Duration) {
+func handleSSHSession(s gliderssh.Session, store *sessionStore, baseOpts []shell.Option, timeout time.Duration, limits session.Limits) {
 	sessionID := s.User()
 	if sessionID == "" || sessionID == "memsh" {
 		b := make([]byte, 8)
@@ -731,7 +810,34 @@ func handleSSHSession(s gliderssh.Session, store *sessionStore, baseOpts []shell
 
 	// ── non-interactive: single command ──────────────────────────────────
 	if len(cmdArgs) > 0 {
+		if err := limits.ValidateRuntime(entry.runtime); err != nil {
+			fmt.Fprintf(s.Stderr(), "error: %v\n", err)
+			_ = s.Exit(1)
+			return
+		}
+		if err := limits.ValidateFS(entry.fs); err != nil {
+			fmt.Fprintf(s.Stderr(), "error: %v\n", err)
+			_ = s.Exit(1)
+			return
+		}
+
 		script := strings.Join(cmdArgs, " ")
+		execTimeout, err := limits.EffectiveTimeout(timeout, entry.runtime, minTimeout)
+		if err != nil {
+			fmt.Fprintf(s.Stderr(), "error: %v\n", err)
+			_ = s.Exit(1)
+			return
+		}
+		var preRunSnap *shell.Snapshot
+		if limits.HasFSLimits() {
+			snap, snapErr := shell.TakeSnapshot(entry.fs, entry.cwd)
+			if snapErr != nil {
+				fmt.Fprintf(s.Stderr(), "error: failed to snapshot session state: %v\n", snapErr)
+				_ = s.Exit(1)
+				return
+			}
+			preRunSnap = snap
+		}
 
 		opts := make([]shell.Option, len(baseOpts), len(baseOpts)+3)
 		copy(opts, baseOpts)
@@ -749,7 +855,7 @@ func handleSSHSession(s gliderssh.Session, store *sessionStore, baseOpts []shell
 		}
 		defer sh.Close()
 
-		ctx, cancel := context.WithTimeout(s.Context(), timeout)
+		ctx, cancel := context.WithTimeout(s.Context(), execTimeout)
 		defer cancel()
 
 		restoreAliases(ctx, sh, entry.fs)
@@ -758,9 +864,27 @@ func handleSSHSession(s gliderssh.Session, store *sessionStore, baseOpts []shell
 			_ = sh.LoadMemshrc(ctx)
 			rcLoaded = true
 		}
+		startedAt := time.Now()
 		runErr := sh.Run(ctx, script)
+		elapsed := time.Since(startedAt)
 		saveAliases(ctx, sh)
-		store.updateSession(sessionID, sh.Cwd(), entry.rcLoaded || rcLoaded)
+		newCwd := sh.Cwd()
+		store.updateSession(sessionID, newCwd, entry.rcLoaded || rcLoaded, elapsed)
+		if fsErr := limits.ValidateFS(entry.fs); fsErr != nil {
+			if preRunSnap != nil {
+				if restoredFS, restoredCwd, restoreErr := shell.RestoreSnapshot(preRunSnap); restoreErr == nil {
+					store.replace(sessionID, restoredFS, restoredCwd)
+				}
+			}
+			fmt.Fprintf(s.Stderr(), "error: %v\n", fsErr)
+			_ = s.Exit(1)
+			return
+		}
+		if rtErr := limits.ValidateRuntime(entry.runtime); rtErr != nil {
+			fmt.Fprintf(s.Stderr(), "error: %v\n", rtErr)
+			_ = s.Exit(1)
+			return
+		}
 
 		if runErr != nil && !errors.Is(runErr, shell.ErrExit) {
 			_ = s.Exit(1)
@@ -786,7 +910,7 @@ func handleSSHSession(s gliderssh.Session, store *sessionStore, baseOpts []shell
 			saveAliases(s.Context(), rcSh)
 			rcSh.Close()
 		}
-		store.updateSession(sessionID, cwd, true)
+		store.updateSession(sessionID, cwd, true, 0)
 	}
 
 	for {
@@ -806,6 +930,28 @@ func handleSSHSession(s gliderssh.Session, store *sessionStore, baseOpts []shell
 			fmt.Fprint(s, "logout\r\n")
 			break
 		}
+		if err := limits.ValidateRuntime(entry.runtime); err != nil {
+			fmt.Fprintf(s, "error: %v\r\n", err)
+			continue
+		}
+		if err := limits.ValidateFS(entry.fs); err != nil {
+			fmt.Fprintf(s, "error: %v\r\n", err)
+			continue
+		}
+		execTimeout, err := limits.EffectiveTimeout(timeout, entry.runtime, minTimeout)
+		if err != nil {
+			fmt.Fprintf(s, "error: %v\r\n", err)
+			continue
+		}
+		var preRunSnap *shell.Snapshot
+		if limits.HasFSLimits() {
+			snap, snapErr := shell.TakeSnapshot(entry.fs, cwd)
+			if snapErr != nil {
+				fmt.Fprintf(s, "error: failed to snapshot session state: %v\r\n", snapErr)
+				continue
+			}
+			preRunSnap = snap
+		}
 
 		var cmdOut strings.Builder
 		opts := make([]shell.Option, len(baseOpts), len(baseOpts)+3)
@@ -822,15 +968,29 @@ func handleSSHSession(s gliderssh.Session, store *sessionStore, baseOpts []shell
 			continue
 		}
 
-		ctx, cancel := context.WithTimeout(s.Context(), timeout)
+		ctx, cancel := context.WithTimeout(s.Context(), execTimeout)
 		restoreAliases(ctx, sh, entry.fs)
+		startedAt := time.Now()
 		runErr := sh.Run(ctx, line)
+		elapsed := time.Since(startedAt)
 		saveAliases(ctx, sh)
 		cancel()
 		newCwd := sh.Cwd()
 		sh.Close()
 
-		store.updateSession(sessionID, newCwd, true)
+		store.updateSession(sessionID, newCwd, true, elapsed)
+		if fsErr := limits.ValidateFS(entry.fs); fsErr != nil {
+			if preRunSnap != nil {
+				if restoredFS, restoredCwd, restoreErr := shell.RestoreSnapshot(preRunSnap); restoreErr == nil {
+					store.replace(sessionID, restoredFS, restoredCwd)
+					newCwd = restoredCwd
+				}
+			}
+			fmt.Fprintf(s, "error: %v\r\n", fsErr)
+		}
+		if rtErr := limits.ValidateRuntime(entry.runtime); rtErr != nil {
+			fmt.Fprintf(s, "error: %v\r\n", rtErr)
+		}
 		cwd = newCwd
 
 		// Translate bare LF → CR+LF for the remote terminal.
@@ -1030,6 +1190,9 @@ func init() {
 	serveCmd.Flags().String("cors-origin", "", "Allowed CORS origin (e.g. 'https://example.com'). Empty = no CORS headers.")
 	serveCmd.Flags().String("api-key", "", "API key for authentication. When set, mutating endpoints require 'Authorization: Bearer <key>'.")
 	serveCmd.Flags().Int("max-sessions", 100, "Maximum number of concurrent sessions (0 = unlimited)")
+	serveCmd.Flags().Int("session-max-files", 0, "Maximum files per session filesystem (0 = unlimited)")
+	serveCmd.Flags().Int64("session-max-bytes", 0, "Maximum total bytes per session filesystem (0 = unlimited)")
+	serveCmd.Flags().Duration("session-max-runtime", 0, "Maximum cumulative command runtime per session (0 = unlimited)")
 	serveCmd.Flags().Bool("ssh", false, "Enable SSH server for remote shell access")
 	serveCmd.Flags().String("ssh-addr", ":2222", "SSH server listen address (used with --ssh); binds all interfaces so both localhost and 127.0.0.1 work")
 	serveCmd.Flags().String("ssh-host-key", "", "Path to persist the SSH host key (default ~/.memsh/ssh_host_key); stable key avoids known_hosts warnings")

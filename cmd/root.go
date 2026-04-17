@@ -18,12 +18,16 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
+	"github.com/amjadjibon/memsh/internal/session"
 	"github.com/amjadjibon/memsh/pkg/shell"
 )
 
 var (
-	execCommand string
-	debugMode   bool
+	execCommand     string
+	debugMode       bool
+	localMaxFiles   int
+	localMaxBytes   int64
+	localMaxRuntime time.Duration
 )
 
 var rootCmd = &cobra.Command{
@@ -59,12 +63,27 @@ var rootCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("failed to start: %w", err)
 		}
+		limits := session.Limits{
+			MaxFiles:   localMaxFiles,
+			MaxBytes:   localMaxBytes,
+			MaxRuntime: localMaxRuntime,
+		}
+		if limits.MaxFiles < 0 {
+			return fmt.Errorf("invalid --max-files: must be >= 0")
+		}
+		if limits.MaxBytes < 0 {
+			return fmt.Errorf("invalid --max-bytes: must be >= 0")
+		}
+		if limits.MaxRuntime < 0 {
+			return fmt.Errorf("invalid --max-runtime: must be >= 0")
+		}
+		var runtimeUsed time.Duration
 
 		if execCommand != "" {
 			if debugMode {
 				fmt.Fprintf(os.Stderr, "memsh: executing: %s\n", execCommand)
 			}
-			if err := sh.Run(ctx, execCommand); err != nil && !errors.Is(err, shell.ErrExit) {
+			if err := runWithLocalLimits(ctx, sh, execCommand, limits, &runtimeUsed); err != nil && !errors.Is(err, shell.ErrExit) {
 				return err
 			}
 			return nil
@@ -78,7 +97,7 @@ var rootCmd = &cobra.Command{
 			if debugMode {
 				fmt.Fprintf(os.Stderr, "memsh: running script: %s\n", args[0])
 			}
-			if err := sh.Run(ctx, string(src)); err != nil && !errors.Is(err, shell.ErrExit) {
+			if err := runWithLocalLimits(ctx, sh, string(src), limits, &runtimeUsed); err != nil && !errors.Is(err, shell.ErrExit) {
 				return err
 			}
 			return nil
@@ -90,19 +109,19 @@ var rootCmd = &cobra.Command{
 				if debugMode {
 					fmt.Fprintf(os.Stderr, "memsh: executing with piped input: %s\n", execCommand)
 				}
-				if err := sh.Run(ctx, execCommand); err != nil && !errors.Is(err, shell.ErrExit) {
+				if err := runWithLocalLimits(ctx, sh, execCommand, limits, &runtimeUsed); err != nil && !errors.Is(err, shell.ErrExit) {
 					return err
 				}
 				return nil
 			}
-			return runPiped(ctx, sh, os.Stdin)
+			return runPiped(ctx, sh, os.Stdin, limits, &runtimeUsed)
 		}
 
-		return runInteractive(ctx, sh)
+		return runInteractive(ctx, sh, limits, &runtimeUsed)
 	},
 }
 
-func runInteractive(ctx context.Context, sh *shell.Shell) error {
+func runInteractive(ctx context.Context, sh *shell.Shell, limits session.Limits, runtimeUsed *time.Duration) error {
 	loadMemshrc(sh, ctx)
 
 	histFile := historyFile()
@@ -165,7 +184,7 @@ func runInteractive(ctx context.Context, sh *shell.Shell) error {
 			if debugMode {
 				fmt.Fprintf(os.Stderr, "memsh: executing multiline script\n")
 			}
-			if err := runWithSignal(ctx, sh, script); err != nil {
+			if err := runWithLocalLimits(ctx, sh, script, limits, runtimeUsed); err != nil {
 				if errors.Is(err, shell.ErrExit) {
 					break
 				}
@@ -182,7 +201,7 @@ func runInteractive(ctx context.Context, sh *shell.Shell) error {
 		if debugMode {
 			fmt.Fprintf(os.Stderr, "memsh: executing: %s\n", line)
 		}
-		if err := runWithSignal(ctx, sh, line); err != nil {
+		if err := runWithLocalLimits(ctx, sh, line, limits, runtimeUsed); err != nil {
 			if errors.Is(err, shell.ErrExit) {
 				break
 			}
@@ -261,7 +280,7 @@ func runWithSignal(parent context.Context, sh *shell.Shell, script string) error
 	}
 }
 
-func runPiped(ctx context.Context, sh *shell.Shell, r io.Reader) error {
+func runPiped(ctx context.Context, sh *shell.Shell, r io.Reader, limits session.Limits, runtimeUsed *time.Duration) error {
 	buf := make([]byte, 0, 4096)
 	tmp := make([]byte, 4096)
 	for {
@@ -281,7 +300,7 @@ func runPiped(ctx context.Context, sh *shell.Shell, r io.Reader) error {
 			if first == "exit" || first == "quit" {
 				return nil
 			}
-			if runErr := sh.Run(ctx, line); runErr != nil {
+			if runErr := runWithLocalLimits(ctx, sh, line, limits, runtimeUsed); runErr != nil {
 				if errors.Is(runErr, shell.ErrExit) {
 					return nil
 				}
@@ -296,6 +315,65 @@ func runPiped(ctx context.Context, sh *shell.Shell, r io.Reader) error {
 		}
 	}
 	return nil
+}
+
+func runWithLocalLimits(parent context.Context, sh *shell.Shell, script string, limits session.Limits, runtimeUsed *time.Duration) error {
+	if err := limits.ValidateRuntime(*runtimeUsed); err != nil {
+		return err
+	}
+	if err := limits.ValidateFS(sh.FS()); err != nil {
+		return err
+	}
+
+	var runErr error
+	startedAt := time.Now()
+	if limits.MaxRuntime > 0 {
+		remaining := limits.MaxRuntime - *runtimeUsed
+		if remaining <= 0 {
+			return fmt.Errorf("session runtime limit exceeded: used %s, max %s", (*runtimeUsed).Truncate(time.Millisecond), limits.MaxRuntime)
+		}
+		runErr = runWithSignalTimeout(parent, sh, script, remaining)
+	} else {
+		runErr = runWithSignal(parent, sh, script)
+	}
+	*runtimeUsed += time.Since(startedAt)
+
+	if err := limits.ValidateFS(sh.FS()); err != nil {
+		return err
+	}
+	if err := limits.ValidateRuntime(*runtimeUsed); err != nil {
+		return err
+	}
+	return runErr
+}
+
+func runWithSignalTimeout(parent context.Context, sh *shell.Shell, script string, timeout time.Duration) error {
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT)
+	defer signal.Stop(sigCh)
+
+	ctx, cancel := context.WithTimeout(parent, timeout)
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- sh.Run(ctx, script)
+	}()
+
+	select {
+	case err := <-done:
+		return err
+	case <-sigCh:
+		cancel()
+		<-done
+		return nil
+	case <-ctx.Done():
+		<-done
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return context.DeadlineExceeded
+		}
+		return ctx.Err()
+	}
 }
 
 func prompt(sh *shell.Shell) string {
@@ -324,6 +402,9 @@ func init() {
 	rootCmd.AddCommand(versionCmd)
 	rootCmd.Flags().StringVarP(&execCommand, "command", "c", "", "Execute a command string")
 	rootCmd.Flags().BoolVarP(&debugMode, "debug", "d", false, "Enable debug output")
+	rootCmd.Flags().IntVar(&localMaxFiles, "max-files", 0, "Maximum files in local shell filesystem (0 = unlimited)")
+	rootCmd.Flags().Int64Var(&localMaxBytes, "max-bytes", 0, "Maximum total bytes in local shell filesystem (0 = unlimited)")
+	rootCmd.Flags().DurationVar(&localMaxRuntime, "max-runtime", 0, "Maximum cumulative runtime for local shell commands (0 = unlimited)")
 	rootCmd.Flags().BoolP("version", "v", false, "Print the version")
 }
 

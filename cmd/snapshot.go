@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/spf13/afero"
 	"github.com/spf13/cobra"
 
+	"github.com/amjadjibon/memsh/internal/session"
 	"github.com/amjadjibon/memsh/pkg/shell"
 )
 
@@ -23,8 +25,8 @@ var snapshotSaveCmd = &cobra.Command{
 to a JSON file.  The snapshot can later be restored with 'memsh snapshot load'.
 
 Example:
-  memsh snapshot save my.json -c 'echo hello > /greeting.txt'
-  memsh snapshot save my.json    # saves an empty root filesystem`,
+    memsh snapshot save my.json -c 'echo hello > /greeting.txt'
+	memsh snapshot save my.json    # saves an empty root filesystem`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		outFile := args[0]
@@ -111,10 +113,12 @@ Example:
 		}
 
 		// Interactive REPL with the restored filesystem.
+		limits := session.Limits{}
+		var runtimeUsed time.Duration
 		if !isInteractiveTerm() {
-			return runPiped(ctx, sh, os.Stdin)
+			return runPiped(ctx, sh, os.Stdin, limits, &runtimeUsed)
 		}
-		return runInteractive(ctx, sh)
+		return runInteractive(ctx, sh, limits, &runtimeUsed)
 	},
 }
 
