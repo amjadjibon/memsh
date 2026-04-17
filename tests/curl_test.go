@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/afero"
 
+	"github.com/amjadjibon/memsh/pkg/network"
 	"github.com/amjadjibon/memsh/pkg/shell"
 )
 
@@ -213,6 +214,18 @@ func TestCurl(t *testing.T) {
 		// "hello world" is 11 bytes
 		if got := strings.TrimSpace(buf.String()); got != "11" {
 			t.Errorf("got byte count %q, want 11", got)
+		}
+	})
+
+	t.Run("network policy off blocks curl", func(t *testing.T) {
+		var buf strings.Builder
+		s := NewTestShell(t, &buf,
+			shell.WithFS(afero.NewMemMapFs()),
+			shell.WithNetworkPolicy(network.Policy{Mode: network.ModeOff}),
+		)
+		err := s.Run(ctx, "curl "+srv.URL+"/hello")
+		if err == nil {
+			t.Fatal("expected curl to fail when network policy is off")
 		}
 	})
 }

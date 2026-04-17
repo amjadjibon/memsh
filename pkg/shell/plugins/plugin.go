@@ -4,6 +4,7 @@ package plugins
 
 import (
 	"context"
+	"net"
 
 	"github.com/spf13/afero"
 )
@@ -78,6 +79,8 @@ type ShellContext struct {
 	CommandNames func() []string
 	// SourceFile sources a path or URL in the current shell context.
 	SourceFile func(ctx context.Context, path string) error
+	// NetworkDialContext provides policy-enforced outbound dialing for plugins.
+	NetworkDialContext func(ctx context.Context, network, address string) (net.Conn, error)
 }
 
 type ctxKey struct{}

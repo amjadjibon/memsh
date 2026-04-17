@@ -30,6 +30,7 @@ var (
 	localMaxRuntime time.Duration
 	localSessionID  string
 	localStoreDir   string
+	localNetFlags   networkFlagConfig
 )
 
 var rootCmd = &cobra.Command{
@@ -77,6 +78,11 @@ var rootCmd = &cobra.Command{
 		if (localStoreDir == "") != (localSessionID == "") {
 			return fmt.Errorf("--session-store and --session-id must be provided together")
 		}
+		netPolicy, err := parseNetworkPolicy(localNetFlags)
+		if err != nil {
+			return err
+		}
+		opts = append(opts, shell.WithNetworkPolicy(netPolicy))
 
 		var runtimeUsed time.Duration
 		persistedRcLoaded := false
@@ -435,6 +441,7 @@ func init() {
 	rootCmd.Flags().DurationVar(&localMaxRuntime, "max-runtime", 0, "Maximum cumulative runtime for local shell commands (0 = unlimited)")
 	rootCmd.Flags().StringVar(&localStoreDir, "session-store", "", "Directory for local session persistence (requires --session-id)")
 	rootCmd.Flags().StringVar(&localSessionID, "session-id", "", "Local persisted session id to load/save (requires --session-store)")
+	addNetworkFlags(rootCmd.Flags(), &localNetFlags)
 	rootCmd.Flags().BoolP("version", "v", false, "Print the version")
 }
 

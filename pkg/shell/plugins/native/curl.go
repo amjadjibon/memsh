@@ -209,6 +209,9 @@ func (CurlPlugin) Run(ctx context.Context, args []string) error {
 	transport := &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: insecure}, //nolint:gosec
 	}
+	if sc.NetworkDialContext != nil {
+		transport.DialContext = sc.NetworkDialContext
+	}
 	client := &http.Client{
 		Timeout:   time.Duration(timeoutSecs) * time.Second,
 		Transport: transport,

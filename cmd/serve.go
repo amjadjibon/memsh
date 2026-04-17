@@ -18,11 +18,14 @@ import (
 	internalserver "github.com/amjadjibon/memsh/internal/server"
 	"github.com/amjadjibon/memsh/internal/session"
 	internalssh "github.com/amjadjibon/memsh/internal/ssh"
+	"github.com/amjadjibon/memsh/pkg/network"
 	"github.com/amjadjibon/memsh/pkg/shell"
 )
 
 // minTimeout is the minimum enforced per-request timeout even if --timeout=0.
 const minTimeout = 5 * time.Second
+
+var serveNetFlags networkFlagConfig
 
 func newSessionStore(ttl time.Duration, maxEntries int, persistDir string) (*session.Store, error) {
 	ctx := context.Background()
@@ -111,6 +114,11 @@ func runServe(cmd *cobra.Command, _ []string) error {
 
 	cfg, _ := loadConfig()
 	baseOpts := buildShellOpts(cfg)
+	netPolicy, err := parseNetworkPolicy(serveNetFlags)
+	if err != nil {
+		return err
+	}
+	baseOpts = append(baseOpts, shell.WithNetworkPolicy(netPolicy))
 
 	// In server mode, do not inherit the host process's environment
 	// to prevent leaking secrets (API keys, DB URLs, etc.) to remote users.
@@ -184,6 +192,10 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		fmt.Fprintf(os.Stderr, "memsh serve: session limits active (max-files=%d, max-bytes=%d, max-runtime=%s)\n",
 			limits.MaxFiles, limits.MaxBytes, limits.MaxRuntime)
 	}
+	if netPolicy.Mode != network.ModeFull || len(netPolicy.AllowDomains) > 0 || len(netPolicy.AllowCIDRs) > 0 || len(netPolicy.AllowPorts) > 0 {
+		fmt.Fprintf(os.Stderr, "memsh serve: network policy active (mode=%s domains=%d cidrs=%d ports=%d)\n",
+			netPolicy.Mode, len(netPolicy.AllowDomains), len(netPolicy.AllowCIDRs), len(netPolicy.AllowPorts))
+	}
 
 	// Start the cron scheduler. It aligns to the next minute boundary and then
 	// ticks every minute, running matching jobs for all active sessions.
@@ -226,5 +238,6 @@ func init() {
 	serveCmd.Flags().Bool("ssh", false, "Enable SSH server for remote shell access")
 	serveCmd.Flags().String("ssh-addr", ":2222", "SSH server listen address (used with --ssh); binds all interfaces so both localhost and 127.0.0.1 work")
 	serveCmd.Flags().String("ssh-host-key", "", "Path to persist the SSH host key (default ~/.memsh/ssh_host_key); stable key avoids known_hosts warnings")
+	addNetworkFlags(serveCmd.Flags(), &serveNetFlags)
 	rootCmd.AddCommand(serveCmd)
 }

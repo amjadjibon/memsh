@@ -5,6 +5,7 @@ import (
 	"io"
 	"maps"
 
+	"github.com/amjadjibon/memsh/pkg/network"
 	"github.com/amjadjibon/memsh/pkg/shell/plugins"
 	"github.com/spf13/afero"
 )
@@ -123,6 +124,29 @@ func WithInheritEnv(inherit bool) Option {
 func WithAliases(aliases map[string]string) Option {
 	return func(s *Shell) {
 		maps.Copy(s.aliases, aliases)
+	}
+}
+
+// WithNetworkPolicy sets outbound networking policy used by builtins/plugins
+// that issue network requests (for example curl and source URL).
+func WithNetworkPolicy(policy network.Policy) Option {
+	return func(s *Shell) {
+		s.networkPolicy = policy
+		s.networkDialer = network.NewDialer(network.DialerConfig{
+			Policy: policy,
+			Meter:  s.networkMeter,
+		})
+	}
+}
+
+// WithNetworkLimits sets per-shell network usage limits.
+func WithNetworkLimits(limits network.Limits) Option {
+	return func(s *Shell) {
+		s.networkMeter = network.NewMeter(limits)
+		s.networkDialer = network.NewDialer(network.DialerConfig{
+			Policy: s.networkPolicy,
+			Meter:  s.networkMeter,
+		})
 	}
 }
 

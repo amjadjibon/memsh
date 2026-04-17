@@ -18,7 +18,7 @@ func (s *Shell) openHandler(ctx context.Context, path string, flag int, perm os.
 		if flag&(os.O_WRONLY|os.O_RDWR|os.O_CREATE|os.O_TRUNC|os.O_APPEND) != 0 {
 			return nil, errors.New("cannot open URL for writing: " + path)
 		}
-		data, err := sourceURL(ctx, path)
+		data, err := sourceURL(ctx, path, s.networkDialer)
 		if err != nil {
 			return nil, err
 		}

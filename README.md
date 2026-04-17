@@ -16,6 +16,7 @@ Shell parsing and interpretation is handled by [mvdan.cc/sh/v3](https://github.c
 - **Native Go plugins** — register custom commands via a simple `Plugin` interface
 - **Interactive REPL** — tab completion, command history, `.memshrc` startup script
 - **HTTP server** — expose the shell over HTTP with session-scoped virtual filesystems
+- **Network egress policy** — control outbound networking with domain/CIDR/port allowlists
 - **Library usage** — embed memsh in Go programs for safe, sandboxed shell scripting
 
 ## Installation
@@ -93,7 +94,13 @@ echo "mkdir /tmp && echo hello > /tmp/f && cat /tmp/f" | memsh
 
 # HTTP server
 memsh serve
-memsh serve --addr :3000 --session-ttl 1h --cors
+memsh serve --addr :3000 --session-ttl 1h --cors-origin https://app.example.com
+
+# Network-restricted shell
+memsh --net-mode allowlist \
+  --net-allow-domain 'httpbin.org' \
+  --net-allow-port 443 \
+  -c 'curl https://httpbin.org/get'
 ```
 
 ## Usage as a Library
@@ -323,12 +330,14 @@ Installed runtimes are stored in `~/.memsh/plugins/*.wasm`.
 | `WithAllowExternalCommands(bool)` | Allow falling back to real OS executables (default: false) |
 | `WithInheritEnv(bool)` | Inherit parent process environment (default: true; use false in server mode) |
 | `WithAliases(map)` | Pre-seed the alias table |
+| `WithNetworkPolicy(policy)` | Set outbound network policy (`off`, `allowlist`, `full`) |
+| `WithNetworkLimits(limits)` | Set network request/bytes/runtime limits |
 
 ## HTTP Server
 
 ```bash
 go run . serve                          # listen on :8080
-go run . serve --addr :3000 --cors      # custom port with CORS
+go run . serve --addr :3000 --cors-origin https://app.example.com
 go run . serve --session-ttl 1h --timeout 30s
 ```
 
@@ -344,6 +353,32 @@ Sessions are always enabled. Send `X-Session-ID: <id>` on `POST /run` to persist
 | `POST /complete` | `{"input":"...","cursor":N}` → tab completion |
 | `GET /session/{id}/snapshot` | Export session filesystem as JSON |
 | `POST /session/{id}/snapshot` | Import a snapshot (use `"new"` as id to create) |
+
+### Networking Policy Flags
+
+These flags work for both local `memsh` and `memsh serve`:
+
+```bash
+--net-mode off|allowlist|full
+--net-allow-domain <domain>    # repeatable, supports *.example.com
+--net-allow-cidr <cidr>        # repeatable, e.g. 203.0.113.0/24
+--net-allow-port <port>        # repeatable, e.g. 443
+```
+
+Examples:
+
+```bash
+# Block all outbound networking
+memsh --net-mode off -c 'curl https://example.com'
+
+# Allow only HTTPS to httpbin.org
+memsh --net-mode allowlist \
+  --net-allow-domain 'httpbin.org' \
+  --net-allow-port 443 \
+  -c 'curl https://httpbin.org/get'
+```
+
+If DNS fails (`lookup <host>: no such host`), that is environment/network resolution, not a policy deny. A policy deny returns explicit errors like `network disabled by policy` or `destination port ... is not allowed`.
 
 ## LLM Integration
 

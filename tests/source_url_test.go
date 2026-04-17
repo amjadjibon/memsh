@@ -7,6 +7,9 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/amjadjibon/memsh/pkg/network"
+	"github.com/amjadjibon/memsh/pkg/shell"
 )
 
 // startScriptServer starts an httptest.Server that serves the given scripts
@@ -171,5 +174,20 @@ echo "$LOCAL $REMOTE"
 	}
 	if got := strings.TrimSpace(buf.String()); got != "yes yes" {
 		t.Errorf("output = %q, want %q", got, "yes yes")
+	}
+}
+
+func TestSourceURLBlockedByNetworkPolicy(t *testing.T) {
+	srv := startScriptServer(t, map[string]string{
+		"/hello.sh": "echo hello_from_url",
+	})
+
+	var buf strings.Builder
+	s := NewTestShell(t, &buf, shell.WithNetworkPolicy(network.Policy{Mode: network.ModeOff}))
+	defer s.Close()
+
+	err := s.Run(context.Background(), fmt.Sprintf("source %s/hello.sh", srv.URL))
+	if err == nil {
+		t.Fatal("expected source URL to be blocked by network policy")
 	}
 }

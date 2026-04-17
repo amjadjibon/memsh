@@ -7,12 +7,14 @@ import (
 	"io"
 	"io/fs"
 	"maps"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 
+	"github.com/amjadjibon/memsh/pkg/network"
 	"github.com/amjadjibon/memsh/pkg/shell/plugins"
 	"github.com/spf13/afero"
 	"github.com/tetratelabs/wazero"
@@ -56,6 +58,10 @@ type Shell struct {
 	aliases     map[string]string
 	sourceDepth int
 	realCwd     string
+
+	networkPolicy network.Policy
+	networkMeter  *network.Meter
+	networkDialer *network.Dialer
 }
 
 type shellEnviron struct {
@@ -107,6 +113,7 @@ func New(opts ...Option) (*Shell, error) {
 		wasmEnabled:   true,
 		inheritEnv:    true,
 		realCwd:       "/",
+		networkPolicy: network.DefaultPolicy(),
 	}
 
 	for _, p := range defaultNativePlugins() {
@@ -115,6 +122,15 @@ func New(opts ...Option) (*Shell, error) {
 
 	for _, opt := range opts {
 		opt(s)
+	}
+	if s.networkMeter == nil {
+		s.networkMeter = network.NewMeter(network.Limits{})
+	}
+	if s.networkDialer == nil {
+		s.networkDialer = network.NewDialer(network.DialerConfig{
+			Policy: s.networkPolicy,
+			Meter:  s.networkMeter,
+		})
 	}
 
 	realCwd := s.cwd
@@ -220,6 +236,12 @@ func (s *Shell) execHandler(next interp.ExecHandlerFunc) interp.ExecHandlerFunc 
 			CommandInfo:  s.commandInfo,
 			CommandNames: s.Commands,
 			SourceFile:   s.sourceFile,
+			NetworkDialContext: func(ctx context.Context, networkName, address string) (net.Conn, error) {
+				if s.networkDialer == nil {
+					return nil, fmt.Errorf("network dialer not configured")
+				}
+				return s.networkDialer.DialContext(ctx, networkName, address)
+			},
 		})
 
 		if fn, ok := s.builtins[args[0]]; ok {
@@ -271,7 +293,7 @@ func (s *Shell) sourceFile(ctx context.Context, path string) error {
 	var data []byte
 	var err error
 	if strings.HasPrefix(path, "https://") || strings.HasPrefix(path, "http://") {
-		data, err = sourceURL(ctx, path)
+		data, err = sourceURL(ctx, path, s.networkDialer)
 	} else {
 		data, err = afero.ReadFile(s.fs, s.resolvePath(path))
 	}
@@ -283,14 +305,19 @@ func (s *Shell) sourceFile(ctx context.Context, path string) error {
 
 // sourceURL fetches a script from a URL and returns its contents.
 // The response body is capped at 10 MiB to prevent memory exhaustion.
-func sourceURL(ctx context.Context, url string) ([]byte, error) {
+func sourceURL(ctx context.Context, url string, dialer *network.Dialer) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("User-Agent", "memsh/1.0")
 
-	resp, err := http.DefaultClient.Do(req)
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	if dialer != nil {
+		transport.DialContext = dialer.DialContext
+	}
+	client := &http.Client{Transport: transport}
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}
