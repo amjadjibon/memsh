@@ -26,6 +26,8 @@ type Config struct {
 	APIKey       string         // API key for Bearer authentication (empty = no auth)
 	MaxSessions  int            // Maximum concurrent sessions (0 = unlimited)
 	SessionStore *session.Store // Session store for persistence
+	BaseOpts     []shell.Option // Optional explicit base shell options
+	Limits       session.Limits // Optional session execution limits
 }
 
 // New creates a new HTTP server with the given configuration.
@@ -43,10 +45,13 @@ func New(cfg Config) (*http.Server, error) {
 		timeout = 5 * time.Second
 	}
 
-	// Load shell config and build base options.
-	shellCfg, _ := config.Load()
-	baseOpts := config.BuildShellOpts(shellCfg)
-	baseOpts = append(baseOpts, shell.WithInheritEnv(false))
+	baseOpts := cfg.BaseOpts
+	if len(baseOpts) == 0 {
+		// Load shell config and build base options.
+		shellCfg, _ := config.Load()
+		baseOpts = config.BuildShellOpts(shellCfg)
+		baseOpts = append(baseOpts, shell.WithInheritEnv(false))
+	}
 
 	// Only enable auth if an API key was explicitly provided.
 	if cfg.APIKey != "" && cfg.APIKey != "default" {
@@ -54,7 +59,7 @@ func New(cfg Config) (*http.Server, error) {
 	}
 
 	// Create handler and register routes.
-	handler := NewHandler(cfg.SessionStore, baseOpts, timeout)
+	handler := NewHandler(cfg.SessionStore, baseOpts, timeout, cfg.Limits)
 	mux := http.NewServeMux()
 	handler.RegisterRoutes(mux)
 

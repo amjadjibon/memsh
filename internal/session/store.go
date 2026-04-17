@@ -12,10 +12,16 @@ package session
 
 import (
 	"context"
+	"encoding/json"
+	"log"
+	"os"
+	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/amjadjibon/memsh/pkg/shell"
 	"github.com/spf13/afero"
 )
 
@@ -27,7 +33,8 @@ type Entry struct {
 	Cwd       string
 	CreatedAt time.Time
 	LastUse   time.Time
-	RcLoaded  bool       // true after /.memshrc has been sourced for this session
+	RcLoaded  bool // true after /.memshrc has been sourced for this session
+	Runtime   time.Duration
 	CronMu    sync.Mutex // serialises concurrent cron job writes to /.cron_log
 }
 
@@ -37,6 +44,7 @@ type Store struct {
 	entries    map[string]*Entry
 	ttl        time.Duration
 	maxEntries int
+	persistDir string
 }
 
 // New creates a new session store with the given TTL and max entries.
@@ -53,6 +61,26 @@ func New(ctx context.Context, ttl time.Duration, maxEntries int) *Store {
 	return st
 }
 
+// NewPersistent creates a new session store with durable persistence.
+func NewPersistent(ctx context.Context, ttl time.Duration, maxEntries int, persistDir string) (*Store, error) {
+	st := &Store{
+		entries:    make(map[string]*Entry),
+		ttl:        ttl,
+		maxEntries: maxEntries,
+		persistDir: strings.TrimSpace(persistDir),
+	}
+	if st.persistDir != "" {
+		if err := os.MkdirAll(st.persistDir, 0o755); err != nil {
+			return nil, err
+		}
+		if err := st.loadPersisted(); err != nil {
+			return nil, err
+		}
+	}
+	go st.reap(ctx)
+	return st, nil
+}
+
 // Get returns an existing session entry or creates one.
 // Returns (entry, true) on success, or (nil, false) if the max session limit
 // would be exceeded by creating a new session.
@@ -61,6 +89,7 @@ func (st *Store) Get(id string) (*Entry, bool) {
 	defer st.mu.Unlock()
 	if e, ok := st.entries[id]; ok {
 		e.LastUse = time.Now()
+		st.persistLocked(id, e)
 		return e, true
 	}
 	// Enforce max-sessions limit.
@@ -75,6 +104,7 @@ func (st *Store) Get(id string) (*Entry, bool) {
 		LastUse:   now,
 	}
 	st.entries[id] = e
+	st.persistLocked(id, e)
 	return e, true
 }
 
@@ -82,13 +112,23 @@ func (st *Store) Get(id string) (*Entry, bool) {
 // in the same session picks it up. Alias state is persisted in the virtual FS
 // via /.memsh_session_aliases, so it does not need a separate field here.
 func (st *Store) Update(id, cwd string, rcLoaded bool) {
+	st.UpdateWithRuntime(id, cwd, rcLoaded, 0)
+}
+
+// UpdateWithRuntime updates session state and runtime accounting.
+func (st *Store) UpdateWithRuntime(id, cwd string, rcLoaded bool, runtimeDelta time.Duration) {
 	st.mu.Lock()
 	defer st.mu.Unlock()
 	if e, ok := st.entries[id]; ok {
 		e.Cwd = cwd
+		if runtimeDelta > 0 {
+			e.Runtime += runtimeDelta
+		}
 		if rcLoaded {
 			e.RcLoaded = true
 		}
+		e.LastUse = time.Now()
+		st.persistLocked(id, e)
 	}
 }
 
@@ -102,7 +142,9 @@ func (st *Store) Replace(id string, fs afero.Fs, cwd string) {
 		e.Fs = fs
 		e.Cwd = cwd
 		e.RcLoaded = false
+		e.Runtime = 0
 		e.LastUse = now
+		st.persistLocked(id, e)
 		return
 	}
 	st.entries[id] = &Entry{
@@ -111,6 +153,7 @@ func (st *Store) Replace(id string, fs afero.Fs, cwd string) {
 		CreatedAt: now,
 		LastUse:   now,
 	}
+	st.persistLocked(id, st.entries[id])
 }
 
 // Delete removes and discards a session.
@@ -118,6 +161,7 @@ func (st *Store) Delete(id string) {
 	st.mu.Lock()
 	defer st.mu.Unlock()
 	delete(st.entries, id)
+	st.deletePersistedLocked(id)
 }
 
 // Count returns the number of active sessions.
@@ -175,6 +219,7 @@ func (st *Store) reap(ctx context.Context) {
 			for id, e := range st.entries {
 				if time.Since(e.LastUse) > st.ttl {
 					delete(st.entries, id)
+					st.deletePersistedLocked(id)
 				}
 			}
 			st.mu.Unlock()
@@ -205,4 +250,96 @@ func (st *Store) Snapshot() []Snap {
 		})
 	}
 	return result
+}
+
+func (st *Store) persistLocked(id string, e *Entry) {
+	if st.persistDir == "" {
+		return
+	}
+	snap, err := shell.TakeSnapshot(e.Fs, e.Cwd)
+	if err != nil {
+		log.Printf("session persistence snapshot %s: %v", id, err)
+		return
+	}
+	if err := writePersistedSession(st.persistDir, persistedSession{
+		ID:        id,
+		Cwd:       e.Cwd,
+		CreatedAt: e.CreatedAt,
+		LastUse:   e.LastUse,
+		RcLoaded:  e.RcLoaded,
+		RuntimeNS: e.Runtime.Nanoseconds(),
+		Snapshot:  snap,
+	}); err != nil {
+		log.Printf("session persistence write %s: %v", id, err)
+	}
+}
+
+func (st *Store) deletePersistedLocked(id string) {
+	if st.persistDir == "" {
+		return
+	}
+	if err := removePersistedSession(st.persistDir, id); err != nil {
+		log.Printf("session persistence remove %s: %v", id, err)
+	}
+}
+
+func (st *Store) loadPersisted() error {
+	entries, err := os.ReadDir(st.persistDir)
+	if err != nil {
+		return err
+	}
+	now := time.Now()
+	for _, de := range entries {
+		if de.IsDir() || filepath.Ext(de.Name()) != ".json" {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(st.persistDir, de.Name()))
+		if err != nil {
+			log.Printf("session persistence read %s: %v", de.Name(), err)
+			continue
+		}
+		var rec persistedSession
+		if err := json.Unmarshal(data, &rec); err != nil {
+			log.Printf("session persistence decode %s: %v", de.Name(), err)
+			continue
+		}
+		if rec.ID == "" || rec.Snapshot == nil {
+			continue
+		}
+		if st.maxEntries > 0 && len(st.entries) >= st.maxEntries {
+			break
+		}
+		if st.ttl > 0 && now.Sub(rec.LastUse) > st.ttl {
+			_ = os.Remove(filepath.Join(st.persistDir, de.Name()))
+			continue
+		}
+		fs, cwd, err := shell.RestoreSnapshot(rec.Snapshot)
+		if err != nil {
+			log.Printf("session persistence restore %s: %v", rec.ID, err)
+			continue
+		}
+		if cwd == "" {
+			cwd = rec.Cwd
+		}
+		if cwd == "" {
+			cwd = "/"
+		}
+		createdAt := rec.CreatedAt
+		if createdAt.IsZero() {
+			createdAt = now
+		}
+		lastUse := rec.LastUse
+		if lastUse.IsZero() {
+			lastUse = now
+		}
+		st.entries[rec.ID] = &Entry{
+			Fs:        fs,
+			Cwd:       cwd,
+			CreatedAt: createdAt,
+			LastUse:   lastUse,
+			RcLoaded:  rec.RcLoaded,
+			Runtime:   time.Duration(rec.RuntimeNS),
+		}
+	}
+	return nil
 }

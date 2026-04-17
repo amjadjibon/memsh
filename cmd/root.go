@@ -28,6 +28,8 @@ var (
 	localMaxFiles   int
 	localMaxBytes   int64
 	localMaxRuntime time.Duration
+	localSessionID  string
+	localStoreDir   string
 )
 
 var rootCmd = &cobra.Command{
@@ -58,11 +60,6 @@ var rootCmd = &cobra.Command{
 		if len(cfg.Plugins.Disable) > 0 {
 			opts = append(opts, shell.WithDisabledPlugins(cfg.Plugins.Disable...))
 		}
-
-		sh, err := shell.New(opts...)
-		if err != nil {
-			return fmt.Errorf("failed to start: %w", err)
-		}
 		limits := session.Limits{
 			MaxFiles:   localMaxFiles,
 			MaxBytes:   localMaxBytes,
@@ -77,7 +74,36 @@ var rootCmd = &cobra.Command{
 		if limits.MaxRuntime < 0 {
 			return fmt.Errorf("invalid --max-runtime: must be >= 0")
 		}
+		if (localStoreDir == "") != (localSessionID == "") {
+			return fmt.Errorf("--session-store and --session-id must be provided together")
+		}
+
 		var runtimeUsed time.Duration
+		persistedRcLoaded := false
+		if localStoreDir != "" && localSessionID != "" {
+			fs, cwd, rt, rcLoaded, loadErr := session.LoadShellSession(localStoreDir, localSessionID)
+			if loadErr == nil {
+				opts = append(opts, shell.WithFS(fs), shell.WithCwd(cwd))
+				runtimeUsed = rt
+				persistedRcLoaded = rcLoaded
+			} else if !os.IsNotExist(loadErr) {
+				return fmt.Errorf("failed to load session %q: %w", localSessionID, loadErr)
+			}
+		}
+
+		sh, err := shell.New(opts...)
+		if err != nil {
+			return fmt.Errorf("failed to start: %w", err)
+		}
+		if localStoreDir != "" && localSessionID != "" {
+			session.RestoreAliases(ctx, sh, sh.FS())
+			defer func() {
+				session.SaveAliases(ctx, sh)
+				if saveErr := session.SaveShellSession(localStoreDir, localSessionID, sh.FS(), sh.Cwd(), runtimeUsed, true); saveErr != nil {
+					fmt.Fprintf(os.Stderr, "memsh: failed to persist session %q: %v\n", localSessionID, saveErr)
+				}
+			}()
+		}
 
 		if execCommand != "" {
 			if debugMode {
@@ -117,12 +143,14 @@ var rootCmd = &cobra.Command{
 			return runPiped(ctx, sh, os.Stdin, limits, &runtimeUsed)
 		}
 
-		return runInteractive(ctx, sh, limits, &runtimeUsed)
+		return runInteractive(ctx, sh, limits, &runtimeUsed, !persistedRcLoaded)
 	},
 }
 
-func runInteractive(ctx context.Context, sh *shell.Shell, limits session.Limits, runtimeUsed *time.Duration) error {
-	loadMemshrc(sh, ctx)
+func runInteractive(ctx context.Context, sh *shell.Shell, limits session.Limits, runtimeUsed *time.Duration, loadRC bool) error {
+	if loadRC {
+		loadMemshrc(sh, ctx)
+	}
 
 	histFile := historyFile()
 
@@ -405,6 +433,8 @@ func init() {
 	rootCmd.Flags().IntVar(&localMaxFiles, "max-files", 0, "Maximum files in local shell filesystem (0 = unlimited)")
 	rootCmd.Flags().Int64Var(&localMaxBytes, "max-bytes", 0, "Maximum total bytes in local shell filesystem (0 = unlimited)")
 	rootCmd.Flags().DurationVar(&localMaxRuntime, "max-runtime", 0, "Maximum cumulative runtime for local shell commands (0 = unlimited)")
+	rootCmd.Flags().StringVar(&localStoreDir, "session-store", "", "Directory for local session persistence (requires --session-id)")
+	rootCmd.Flags().StringVar(&localSessionID, "session-id", "", "Local persisted session id to load/save (requires --session-store)")
 	rootCmd.Flags().BoolP("version", "v", false, "Print the version")
 }
 

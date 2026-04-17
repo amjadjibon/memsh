@@ -42,15 +42,17 @@ type Handler struct {
 	Store     *session.Store
 	BaseOpts  []shell.Option
 	Timeout   time.Duration
+	Limits    session.Limits
 	StartTime time.Time
 }
 
 // NewHandler creates a new HTTP handler with the given dependencies.
-func NewHandler(store *session.Store, baseOpts []shell.Option, timeout time.Duration) *Handler {
+func NewHandler(store *session.Store, baseOpts []shell.Option, timeout time.Duration, limits session.Limits) *Handler {
 	return &Handler{
 		Store:     store,
 		BaseOpts:  baseOpts,
 		Timeout:   timeout,
+		Limits:    limits,
 		StartTime: time.Now(),
 	}
 }
@@ -105,12 +107,6 @@ func (h *Handler) handleRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx := r.Context()
-	ctx = native.WithPagerMode(ctx)
-	var cancel context.CancelFunc
-	ctx, cancel = context.WithTimeout(ctx, h.Timeout)
-	defer cancel()
-
 	var out strings.Builder
 	opts := make([]shell.Option, len(h.BaseOpts)+1)
 	copy(opts, h.BaseOpts)
@@ -118,6 +114,8 @@ func (h *Handler) handleRun(w http.ResponseWriter, r *http.Request) {
 
 	sessionID := r.Header.Get("X-Session-ID")
 	var entry *session.Entry
+	execTimeout := h.Timeout
+	var preRunSnap *shell.Snapshot
 	if sessionID != "" {
 		var ok bool
 		entry, ok = h.Store.Get(sessionID)
@@ -127,8 +125,35 @@ func (h *Handler) handleRun(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
+		if err := h.Limits.ValidateRuntime(entry.Runtime); err != nil {
+			WriteJSON(w, http.StatusTooManyRequests, runResponse{Error: err.Error(), Cwd: entry.Cwd})
+			return
+		}
+		if err := h.Limits.ValidateFS(entry.Fs); err != nil {
+			WriteJSON(w, http.StatusTooManyRequests, runResponse{Error: err.Error(), Cwd: entry.Cwd})
+			return
+		}
+		if h.Limits.HasFSLimits() {
+			snap, err := shell.TakeSnapshot(entry.Fs, entry.Cwd)
+			if err != nil {
+				log.Printf("memsh serve: snapshot before run failed: %v", err)
+				WriteJSON(w, http.StatusInternalServerError, runResponse{Error: "internal server error", Cwd: entry.Cwd})
+				return
+			}
+			preRunSnap = snap
+		}
+		t, err := h.Limits.EffectiveTimeout(h.Timeout, entry.Runtime, MinTimeout)
+		if err != nil {
+			WriteJSON(w, http.StatusTooManyRequests, runResponse{Error: err.Error(), Cwd: entry.Cwd})
+			return
+		}
+		execTimeout = t
 		opts = append(opts, shell.WithFS(entry.Fs), shell.WithCwd(entry.Cwd))
 	}
+	ctx := native.WithPagerMode(r.Context())
+	var cancel context.CancelFunc
+	ctx, cancel = context.WithTimeout(ctx, execTimeout)
+	defer cancel()
 
 	sh, err := shell.New(opts...)
 	if err != nil {
@@ -148,12 +173,30 @@ func (h *Handler) handleRun(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	startedAt := time.Now()
 	runErr := sh.Run(ctx, req.Script)
+	elapsed := time.Since(startedAt)
 	cwd := sh.Cwd()
+	respError := ""
 
 	if sessionID != "" {
 		session.SaveAliases(ctx, sh)
-		h.Store.Update(sessionID, cwd, entry.RcLoaded || rcLoaded)
+		h.Store.UpdateWithRuntime(sessionID, cwd, entry.RcLoaded || rcLoaded, elapsed)
+		if err := h.Limits.ValidateFS(entry.Fs); err != nil {
+			respError = err.Error()
+			if preRunSnap != nil {
+				if restoredFS, restoredCwd, restoreErr := shell.RestoreSnapshot(preRunSnap); restoreErr == nil {
+					h.Store.Replace(sessionID, restoredFS, restoredCwd)
+					entry.Fs = restoredFS
+					cwd = restoredCwd
+				} else {
+					log.Printf("memsh serve: snapshot restore failed after limit error: %v", restoreErr)
+				}
+			}
+		}
+		if err := h.Limits.ValidateRuntime(entry.Runtime); err != nil {
+			respError = err.Error()
+		}
 	}
 
 	output := out.String()
@@ -165,10 +208,17 @@ func (h *Handler) handleRun(w http.ResponseWriter, r *http.Request) {
 	resp := runResponse{Output: output, Pager: pager, Cwd: cwd}
 	if runErr != nil && !errors.Is(runErr, shell.ErrExit) {
 		if errors.Is(runErr, context.DeadlineExceeded) {
-			resp.Error = "timeout: execution exceeded " + h.Timeout.String()
+			if sessionID != "" && h.Limits.MaxRuntime > 0 && entry.Runtime >= h.Limits.MaxRuntime {
+				resp.Error = fmt.Sprintf("session runtime limit exceeded: used %s, max %s", entry.Runtime.Round(time.Millisecond), h.Limits.MaxRuntime)
+			} else {
+				resp.Error = "timeout: execution exceeded " + execTimeout.String()
+			}
 		} else {
 			resp.Error = runErr.Error()
 		}
+	}
+	if respError != "" {
+		resp.Error = respError
 	}
 	WriteJSON(w, http.StatusOK, resp)
 }
@@ -219,6 +269,10 @@ func (h *Handler) handleSnapshotPost(w http.ResponseWriter, r *http.Request) {
 	}
 	fs, cwd, err := shell.RestoreSnapshot(snap)
 	if err != nil {
+		WriteJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": err.Error()})
+		return
+	}
+	if err := h.Limits.ValidateFS(fs); err != nil {
 		WriteJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": err.Error()})
 		return
 	}

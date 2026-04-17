@@ -118,7 +118,7 @@ Example:
 		if !isInteractiveTerm() {
 			return runPiped(ctx, sh, os.Stdin, limits, &runtimeUsed)
 		}
-		return runInteractive(ctx, sh, limits, &runtimeUsed)
+		return runInteractive(ctx, sh, limits, &runtimeUsed, true)
 	},
 }
 
