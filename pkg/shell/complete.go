@@ -96,6 +96,13 @@ func completePath(token string, fs afero.Fs, cwd string) []string {
 		}
 	}
 
+	// Validate that dir is a clean absolute path within the virtual FS root.
+	// This prevents path traversal from user-supplied token values.
+	dir = filepath.Clean(dir)
+	if !filepath.IsAbs(dir) {
+		return nil
+	}
+
 	entries, err := afero.ReadDir(fs, dir)
 	if err != nil {
 		return nil
@@ -118,9 +125,10 @@ func completePath(token string, fs afero.Fs, cwd string) []string {
 }
 
 // absJoin resolves path relative to cwd when it is not already absolute.
+// The returned path is always clean and absolute.
 func absJoin(path, cwd string) string {
 	if path == "" || path == "." || path == "./" {
-		return cwd
+		return filepath.Clean(cwd)
 	}
 	if strings.HasPrefix(path, "/") {
 		return filepath.Clean(path)
