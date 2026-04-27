@@ -19,8 +19,8 @@ import (
 )
 
 // startTestSSHServer starts an in-process memsh SSH server on a random port.
-// It returns the address ("127.0.0.1:PORT") and a cancel func.
-func startTestSSHServer(t *testing.T, fs afero.Fs, apiKey string) string {
+// It returns the address ("127.0.0.1:PORT") and the server's host public key.
+func startTestSSHServer(t *testing.T, fs afero.Fs, apiKey string) (string, gossh.PublicKey) {
 	t.Helper()
 
 	_, priv, err := ed25519.GenerateKey(rand.Reader)
@@ -31,6 +31,7 @@ func startTestSSHServer(t *testing.T, fs afero.Fs, apiKey string) string {
 	if err != nil {
 		t.Fatalf("signer: %v", err)
 	}
+	hostKey := signer.PublicKey()
 
 	// Find a free port.
 	ln := newLoopbackListener(t)
@@ -126,12 +127,25 @@ func startTestSSHServer(t *testing.T, fs afero.Fs, apiKey string) string {
 		c, err := net.Dial("tcp", addr)
 		if err == nil {
 			c.Close()
-			return addr
+			return addr, hostKey
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatalf("SSH server at %s did not start", addr)
-	return ""
+	return "", nil
+}
+
+// seedKnownHosts writes the server's host key into the client's virtual FS so
+// that sshTOFUCallback does not prompt for interactive confirmation.
+func seedKnownHosts(t *testing.T, clientFS afero.Fs, addr string, hostKey gossh.PublicKey) {
+	t.Helper()
+	entry := []byte(addr + " " + string(gossh.MarshalAuthorizedKey(hostKey)))
+	if err := clientFS.MkdirAll("/.memsh", 0o700); err != nil {
+		t.Fatalf("MkdirAll /.memsh: %v", err)
+	}
+	if err := afero.WriteFile(clientFS, "/.memsh/known_hosts", entry, 0o600); err != nil {
+		t.Fatalf("write known_hosts: %v", err)
+	}
 }
 
 func TestSSH(t *testing.T) {
@@ -139,11 +153,13 @@ func TestSSH(t *testing.T) {
 
 	t.Run("single command returns output", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		addr := startTestSSHServer(t, fs, "")
+		addr, hostKey := startTestSSHServer(t, fs, "")
 		host, port, _ := net.SplitHostPort(addr)
 
+		clientFS := afero.NewMemMapFs()
+		seedKnownHosts(t, clientFS, addr, hostKey)
 		var buf strings.Builder
-		s := NewTestShell(t, &buf, shell.WithFS(afero.NewMemMapFs()))
+		s := NewTestShell(t, &buf, shell.WithFS(clientFS))
 		err := s.Run(ctx, fmt.Sprintf("ssh -P %s memsh@%s -- echo hello", port, host))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -155,11 +171,13 @@ func TestSSH(t *testing.T) {
 
 	t.Run("single command with password auth", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		addr := startTestSSHServer(t, fs, "secret")
+		addr, hostKey := startTestSSHServer(t, fs, "secret")
 		host, port, _ := net.SplitHostPort(addr)
 
+		clientFS := afero.NewMemMapFs()
+		seedKnownHosts(t, clientFS, addr, hostKey)
 		var buf strings.Builder
-		s := NewTestShell(t, &buf, shell.WithFS(afero.NewMemMapFs()))
+		s := NewTestShell(t, &buf, shell.WithFS(clientFS))
 		err := s.Run(ctx, fmt.Sprintf("ssh -p secret -P %s memsh@%s -- echo auth_ok", port, host))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -171,11 +189,13 @@ func TestSSH(t *testing.T) {
 
 	t.Run("wrong password fails", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		addr := startTestSSHServer(t, fs, "secret")
+		addr, hostKey := startTestSSHServer(t, fs, "secret")
 		host, port, _ := net.SplitHostPort(addr)
+		clientFS := afero.NewMemMapFs()
+		seedKnownHosts(t, clientFS, addr, hostKey)
 
 		var buf strings.Builder
-		s := NewTestShell(t, &buf, shell.WithFS(afero.NewMemMapFs()))
+		s := NewTestShell(t, &buf, shell.WithFS(clientFS))
 		err := s.Run(ctx, fmt.Sprintf("ssh -p wrong -P %s memsh@%s -- echo hi", port, host))
 		if err == nil {
 			t.Fatal("expected error for wrong password, got nil")
@@ -193,11 +213,13 @@ func TestSSH(t *testing.T) {
 
 	t.Run("single command file creation persists in remote FS", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		addr := startTestSSHServer(t, fs, "")
+		addr, hostKey := startTestSSHServer(t, fs, "")
 		host, port, _ := net.SplitHostPort(addr)
 
+		clientFS := afero.NewMemMapFs()
+		seedKnownHosts(t, clientFS, addr, hostKey)
 		var buf strings.Builder
-		s := NewTestShell(t, &buf, shell.WithFS(afero.NewMemMapFs()))
+		s := NewTestShell(t, &buf, shell.WithFS(clientFS))
 
 		// Create a file on the remote.
 		if err := s.Run(ctx, fmt.Sprintf("ssh -P %s %s -- 'echo remote > /remotefile.txt'", port, host)); err != nil {
