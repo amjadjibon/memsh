@@ -3,8 +3,6 @@ name: CodeQL
 on:
   push:
     branches: ["*-codeql"]
-  schedule:
-    - cron: "0 0 * * 1"
 
 permissions:
   contents: read
@@ -31,7 +29,7 @@ jobs:
           queries: security-and-quality
 
       - name: Build
-        run: go build ./...
+        run: make build
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v4
