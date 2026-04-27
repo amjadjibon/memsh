@@ -79,24 +79,30 @@ func RestoreSnapshot(snap *Snapshot) (afero.Fs, string, error) {
 	}
 	fs := afero.NewMemMapFs()
 	for _, entry := range snap.Files {
+		// Sanitize: path must be a clean absolute path within the virtual root.
+		// This rejects traversal sequences (e.g. "../../etc") from untrusted JSON.
+		cleanPath := filepath.Clean(entry.Path)
+		if !filepath.IsAbs(cleanPath) {
+			return nil, "", fmt.Errorf("snapshot: invalid path %q: must be absolute", entry.Path)
+		}
 		if entry.IsDir {
-			if err := fs.MkdirAll(entry.Path, entry.Mode); err != nil {
-				return nil, "", fmt.Errorf("snapshot: mkdir %s: %w", entry.Path, err)
+			if err := fs.MkdirAll(cleanPath, entry.Mode); err != nil {
+				return nil, "", fmt.Errorf("snapshot: mkdir %s: %w", cleanPath, err)
 			}
 			continue
 		}
 		// Ensure parent directory exists.
-		if dir := filepath.Dir(entry.Path); dir != "/" && dir != "." {
+		if dir := filepath.Dir(cleanPath); dir != "/" && dir != "." {
 			if err := fs.MkdirAll(dir, 0o755); err != nil {
 				return nil, "", fmt.Errorf("snapshot: mkdir parent %s: %w", dir, err)
 			}
 		}
-		if err := afero.WriteFile(fs, entry.Path, entry.Content, entry.Mode); err != nil {
-			return nil, "", fmt.Errorf("snapshot: write %s: %w", entry.Path, err)
+		if err := afero.WriteFile(fs, cleanPath, entry.Content, entry.Mode); err != nil {
+			return nil, "", fmt.Errorf("snapshot: write %s: %w", cleanPath, err)
 		}
 	}
-	cwd := snap.Cwd
-	if cwd == "" {
+	cwd := filepath.Clean(snap.Cwd)
+	if !filepath.IsAbs(cwd) {
 		cwd = "/"
 	}
 	return fs, cwd, nil
