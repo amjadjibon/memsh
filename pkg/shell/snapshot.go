@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/afero"
 )
@@ -79,8 +80,12 @@ func RestoreSnapshot(snap *Snapshot) (afero.Fs, string, error) {
 	}
 	fs := afero.NewMemMapFs()
 	for _, entry := range snap.Files {
-		// Sanitize: path must be a clean absolute path within the virtual root.
-		// This rejects traversal sequences (e.g. "../../etc") from untrusted JSON.
+		// Sanitize: reject traversal sequences on the raw value — this explicit
+		// strings.Contains guard is the barrier CodeQL's taint analysis recognises.
+		// filepath.Clean + IsAbs below then enforce the absolute-path invariant.
+		if strings.Contains(entry.Path, "..") {
+			return nil, "", fmt.Errorf("snapshot: invalid path %q: contains traversal sequence", entry.Path)
+		}
 		cleanPath := filepath.Clean(entry.Path)
 		if !filepath.IsAbs(cleanPath) {
 			return nil, "", fmt.Errorf("snapshot: invalid path %q: must be absolute", entry.Path)
@@ -101,9 +106,11 @@ func RestoreSnapshot(snap *Snapshot) (afero.Fs, string, error) {
 			return nil, "", fmt.Errorf("snapshot: write %s: %w", cleanPath, err)
 		}
 	}
-	cwd := filepath.Clean(snap.Cwd)
-	if !filepath.IsAbs(cwd) {
-		cwd = "/"
+	cwd := "/"
+	if !strings.Contains(snap.Cwd, "..") {
+		if c := filepath.Clean(snap.Cwd); filepath.IsAbs(c) {
+			cwd = c
+		}
 	}
 	return fs, cwd, nil
 }
