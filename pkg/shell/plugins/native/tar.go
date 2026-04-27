@@ -276,9 +276,9 @@ func tarExtract(hc interp.HandlerContext, sc plugins.ShellContext, archiveFile, 
 		src = bzip2.NewReader(src)
 	}
 
-	destDir := "/"
+	cleanDest := filepath.Clean("/")
 	if changeDir != "" {
-		destDir = sc.ResolvePath(changeDir)
+		cleanDest = filepath.Clean(sc.ResolvePath(changeDir))
 	}
 
 	tr := tar.NewReader(src)
@@ -291,12 +291,15 @@ func tarExtract(hc interp.HandlerContext, sc plugins.ShellContext, archiveFile, 
 			return fmt.Errorf("tar: %w", err)
 		}
 
-		// sanitise path — strip leading / and ..
-		name := filepath.Clean(hdr.Name)
-		if strings.HasPrefix(name, "..") {
-			continue
+		// Zip Slip prevention: resolve the entry path relative to cleanDest and
+		// reject anything that would land outside it. filepath.Join normalises
+		// absolute entry names (e.g. "/etc/passwd") into the destination tree,
+		// and filepath.Rel detects any residual traversal (e.g. "../../etc").
+		target := filepath.Join(cleanDest, hdr.Name)
+		rel, relErr := filepath.Rel(cleanDest, target)
+		if relErr != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			continue // skip entries that escape the destination directory
 		}
-		target := destDir + "/" + name
 
 		if verbose {
 			fmt.Fprintln(hc.Stdout, hdr.Name)

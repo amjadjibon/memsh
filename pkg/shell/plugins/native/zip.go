@@ -255,10 +255,10 @@ func runUnzip(ctx context.Context, args []string) error {
 		return nil
 	}
 
-	base := "/"
+	cleanBase := filepath.Clean("/")
 	if destDir != "" {
-		base = sc.ResolvePath(destDir)
-		if err := sc.FS.MkdirAll(base, 0o755); err != nil {
+		cleanBase = filepath.Clean(sc.ResolvePath(destDir))
+		if err := sc.FS.MkdirAll(cleanBase, 0o755); err != nil {
 			return fmt.Errorf("unzip: %w", err)
 		}
 	}
@@ -267,12 +267,13 @@ func runUnzip(ctx context.Context, args []string) error {
 		if filterFiles != nil && !filterFiles[f.Name] {
 			continue
 		}
-		// sanitise path
-		name := filepath.Clean(f.Name)
-		if strings.HasPrefix(name, "..") {
-			continue
+		// Zip Slip prevention: resolve entry path inside cleanBase, then verify
+		// it does not escape via filepath.Rel (handles both ".." and absolute names).
+		target := filepath.Join(cleanBase, f.Name)
+		rel, relErr := filepath.Rel(cleanBase, target)
+		if relErr != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			continue // skip entries that escape the destination directory
 		}
-		target := base + "/" + name
 
 		if f.FileInfo().IsDir() {
 			sc.FS.MkdirAll(target, os.FileMode(f.Mode())|0o700)
