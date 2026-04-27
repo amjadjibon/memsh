@@ -1,8 +1,8 @@
 name: CodeQL
 
 on:
-  push:
-    branches: ["*-codeql"]
+  schedule:
+    - cron: "0 0 * * 1"
 
 permissions:
   contents: read
