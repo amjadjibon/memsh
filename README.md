@@ -1,5 +1,10 @@
 # memsh
 
+[![CI](https://github.com/amjadjibon/memsh/actions/workflows/ci.yml/badge.svg)](https://github.com/amjadjibon/memsh/actions/workflows/ci.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/amjadjibon/memsh.svg)](https://pkg.go.dev/github.com/amjadjibon/memsh)
+[![Go Report Card](https://goreportcard.com/badge/github.com/amjadjibon/memsh)](https://goreportcard.com/report/github.com/amjadjibon/memsh)
+[![codecov](https://codecov.io/gh/amjadjibon/memsh/branch/main/graph/badge.svg)](https://codecov.io/gh/amjadjibon/memsh)
+
 A virtual bash shell implemented in Go. memsh executes bash-like commands against an in-memory filesystem — the real OS filesystem is never touched, and external OS commands are blocked by default.
 
 Shell parsing and interpretation is handled by [mvdan.cc/sh/v3](https://github.com/mvdan/sh). Every command is a native Go plugin or WASM plugin — there is no reliance on host system binaries.
