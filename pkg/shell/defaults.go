@@ -67,6 +67,7 @@ func defaultNativePlugins() []plugins.Plugin {
 		// scripting
 		native.LuaPlugin{},
 		native.GojaPlugin{},
+		native.GoPlugin{},
 		native.SQLitePlugin{},
 
 		// archive

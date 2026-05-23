@@ -68,7 +68,7 @@ go run . serve
 go run . serve --addr :3000 --session-ttl 1h --cors
 ```
 
-Test suites in `tests/`: `TestAwk`, `TestBase64`, `TestFind`, `TestGrep`, `TestGoja`, `TestJq`, `TestLua`, `TestPhp`, `TestPython`, `TestRuby`, `TestWc`, `TestYq`, `TestGit`, `TestSQLite`, `TestSnapshot`, and more.
+Test suites in `tests/`: `TestAwk`, `TestBase64`, `TestFind`, `TestGrep`, `TestGo`, `TestGoja`, `TestJq`, `TestLua`, `TestPhp`, `TestPython`, `TestRuby`, `TestWc`, `TestYq`, `TestGit`, `TestSQLite`, `TestSnapshot`, and more.
 
 ## Architecture
 
@@ -120,6 +120,7 @@ Every shell command is a separate file implementing `plugins.Plugin`. All are re
 | `awk.go` | `awk` | `github.com/benhoyt/goawk` |
 | `grep.go` | `grep` | stdlib |
 | `find.go` | `find` | stdlib |
+| `go.go` | `go` | `github.com/mvm-sh/mvm/interp` — `go run`, `go test`, `go fmt` |
 | `lua.go` | `lua` | `github.com/yuin/gopher-lua` |
 | `goja.go` | `goja` | `github.com/dop251/goja` |
 | `jq.go` | `jq` | `github.com/itchyny/gojq` |
@@ -258,6 +259,7 @@ go run . plugin install php     # PHP 8.2.6 slim (~6 MB)
 - `github.com/spf13/afero` — in-memory filesystem
 - `github.com/tetratelabs/wazero` — WASM runtime
 - `github.com/benhoyt/goawk` — AWK
+- `github.com/mvm-sh/mvm/interp` — Go interpreter for the `go` plugin (`go run`, `go test`, `go fmt`)
 - `github.com/yuin/gopher-lua` — Lua 5.1
 - `github.com/dop251/goja` — JavaScript ES2020+
 - `github.com/itchyny/gojq` — jq expression engine (used by both `jq` and `yq`)

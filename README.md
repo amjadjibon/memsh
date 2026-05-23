@@ -11,7 +11,7 @@ Shell parsing and interpretation is handled by [mvdan.cc/sh/v3](https://github.c
 - **Bash-like syntax** — pipes, redirects (`>`, `>>`), `&&`, `;`, subshells, aliases
 - **60+ built-in commands** — file ops, text processing, archiving, networking, scripting, and more
 - **Combined short flags** — `-rf`, `-la`, `-jrc` etc. work on all commands
-- **Scripting languages** — Lua (gopher-lua), JavaScript (goja ES2020+), JSON/YAML (jq/yq), SQLite
+- **Scripting languages** — Go (MVM interpreter), Lua (gopher-lua), JavaScript (goja ES2020+), JSON/YAML (jq/yq), SQLite
 - **WASM plugin system** — extend with WASI-compiled plugins (Python, Ruby, PHP runtimes)
 - **Native Go plugins** — register custom commands via a simple `Plugin` interface
 - **Interactive REPL** — tab completion, command history, `.memshrc` startup script
@@ -202,6 +202,7 @@ sh.Run(ctx, "yq .host /config.yaml") // localhost
 | `crontab` | Schedule commands with cron expressions |
 | `curl` | Transfer data from URLs |
 | `envsubst` | Substitute environment variables in strings |
+| `go` | Go tool — `go run`, `go test`, `go fmt` against the virtual filesystem |
 | `goja` | Execute JavaScript (ES2020+) code |
 | `git` | Pure-Go git implementation |
 | `gzip`, `gunzip` | Compress/decompress gzip files |
@@ -281,6 +282,50 @@ lua -e 'print("hello from lua")'
 echo 'for i=1,3 do print(i) end' | lua
 lua /script.lua
 ```
+
+### Go Scripting (`go`)
+
+The `go` command emulates the Go toolchain against the virtual filesystem, backed by the [MVM interpreter](https://github.com/mvm-sh/mvm). stdlib is auto-imported — no `import` statements needed for inline expressions.
+
+```bash
+# go run — execute a source file
+echo 'package main' > /main.go
+echo 'func main() { fmt.Println("hello") }' >> /main.go
+go run /main.go                                    # hello
+
+# go run — fibonacci
+echo 'package main' > /fib.go
+echo 'func fib(n int) int { if n<=1{return n}; return fib(n-1)+fib(n-2) }' >> /fib.go
+echo 'func main() { for i:=0;i<=7;i++ { fmt.Println(i,fib(i)) } }' >> /fib.go
+go run /fib.go
+
+# go test — runs Test* functions; reports PASS/FAIL per test
+echo 'package main' > /math_test.go
+echo 'import "testing"' >> /math_test.go
+echo 'func TestAdd(t *testing.T) { if 1+1!=2 { t.Error("broken") } }' >> /math_test.go
+go test /                                          # --- PASS: TestAdd / ok
+go test ./...                                      # recurse all subdirs
+go test / -run TestAdd                             # filter by name regex
+go test / -v                                       # verbose (=== RUN lines)
+
+# go fmt — gofmt source files in the virtual FS
+echo 'package main' > /ugly.go
+echo 'func main(){fmt.Println("hi")}' >> /ugly.go
+go fmt /ugly.go
+cat /ugly.go                                       # properly formatted
+
+# stdin pipe — auto-imported stdlib, no package/import needed
+echo 'fmt.Println(strings.ToUpper("hello"))' | go
+echo 'fmt.Println(math.Sqrt(144))' | go
+
+# go version
+go version                                         # go version mvm0.3.0
+```
+
+**Notes:**
+- `go test` rewrites `*testing.T` to a built-in shim; `t.Error`, `t.Errorf`, `t.Fatal`, `t.Fatalf`, `t.Log`, `t.Run`, `t.Skip` all work.
+- MVM is alpha (v0.3.0); some stdlib packages are partially supported. Unsupported calls surface as interpreter errors.
+- stdin mode and `go run` use stdlib auto-import — `fmt`, `strings`, `math`, etc. work without explicit imports.
 
 ### JavaScript Scripting
 

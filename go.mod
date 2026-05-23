@@ -20,6 +20,7 @@ require (
 	github.com/go-git/go-git/v5 v5.17.2
 	github.com/itchyny/gojq v0.12.19
 	github.com/modelcontextprotocol/go-sdk v1.5.0
+	github.com/mvm-sh/mvm v0.3.0
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/spf13/afero v1.15.0
 	github.com/spf13/cobra v1.10.2
