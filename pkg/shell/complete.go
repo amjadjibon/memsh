@@ -8,6 +8,22 @@ import (
 	"github.com/spf13/afero"
 )
 
+// sanitizePath cleans a user-provided path and ensures it cannot traverse
+// above the virtual filesystem root. Returns ("", false) if the path is
+// unsafe.
+func sanitizePath(p string) (string, bool) {
+	p = filepath.Clean(p)
+	if !filepath.IsAbs(p) {
+		return "", false
+	}
+	// filepath.Clean already resolves ".." sequences, but double-check
+	// that the result doesn't try to escape root.
+	if p == ".." || strings.HasPrefix(p, "../") {
+		return "", false
+	}
+	return p, true
+}
+
 // CompleteResult holds the tab-completion results for a given input.
 type CompleteResult struct {
 	Completions []string `json:"completions"`
@@ -97,9 +113,8 @@ func completePath(token string, fs afero.Fs, cwd string) []string {
 	}
 
 	// Validate that dir is a clean absolute path within the virtual FS root.
-	// This prevents path traversal from user-supplied token values.
-	dir = filepath.Clean(dir)
-	if !filepath.IsAbs(dir) {
+	dir, ok := sanitizePath(dir)
+	if !ok {
 		return nil
 	}
 
