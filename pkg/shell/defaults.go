@@ -49,6 +49,9 @@ func defaultNativePlugins() []plugins.Plugin {
 
 		// data tools
 		native.JqPlugin{},
+		native.UUIDPlugin{},
+		native.Base32Plugin{},
+		native.StringsPlugin{},
 		native.YqPlugin{},
 		native.Base64Plugin{},
 		native.XxdPlugin{},
@@ -103,6 +106,8 @@ func defaultNativePlugins() []plugins.Plugin {
 
 		// user info
 		native.WhoamiPlugin{},
+		native.IdPlugin{},
+		native.HostnamePlugin{},
 
 		// terminal / help
 		native.ClearPlugin{},
