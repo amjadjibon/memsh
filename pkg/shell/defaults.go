@@ -90,6 +90,7 @@ func defaultNativePlugins() []plugins.Plugin {
 		native.EnvsubstPlugin{},
 
 		// shell / session
+		native.WatchPlugin{},
 		native.ReadPlugin{},
 		native.SourcePlugin{},
 		native.DotPlugin{},
