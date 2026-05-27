@@ -6,14 +6,6 @@ import (
 	nativegit "github.com/amjadjibon/memsh/pkg/shell/plugins/native/git"
 )
 
-// defaultPlugins holds WASM plugins bundled at compile time.
-// Currently empty — base64 and wc are native Go plugins in shell/plugins/native/.
-// To bundle a .wasm file: add it to shell/plugins/ and restore:
-//
-//	//go:embed plugins/*.wasm
-//	var builtinPluginsFS embed.FS
-var defaultPlugins = map[string]WASMConfig{}
-
 // defaultNativePlugins returns the built-in native Plugin implementations
 // registered on every new Shell unless overridden by a WithPlugin option.
 func defaultNativePlugins() []plugins.Plugin {
@@ -107,6 +99,9 @@ func defaultNativePlugins() []plugins.Plugin {
 		native.YesPlugin{},
 		native.TimeoutPlugin{},
 		native.CrontabPlugin{},
+
+		// user info
+		native.WhoamiPlugin{},
 
 		// terminal / help
 		native.ClearPlugin{},

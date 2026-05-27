@@ -167,12 +167,6 @@ func New(opts ...Option) (*Shell, error) {
 	s.runner = runner
 
 	if s.wasmEnabled {
-		for name, wasm := range defaultPlugins {
-			if _, exists := s.plugins[name]; !exists {
-				s.plugins[name] = wasm
-			}
-		}
-
 		if err := s.loadPlugins(); err != nil {
 			return nil, err
 		}
