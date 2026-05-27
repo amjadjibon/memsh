@@ -14,6 +14,9 @@ func defaultNativePlugins() []plugins.Plugin {
 		native.CdPlugin{},
 		native.PwdPlugin{},
 		native.LsPlugin{},
+		native.BasenamePlugin{},
+		native.DirnamePlugin{},
+		native.RealpathPlugin{},
 		native.MkdirPlugin{},
 		native.RmPlugin{},
 		native.RmdirPlugin{},
@@ -31,6 +34,7 @@ func defaultNativePlugins() []plugins.Plugin {
 
 		// text processing
 		native.CatPlugin{},
+		native.TacPlugin{},
 		native.HeadPlugin{},
 		native.TailPlugin{},
 		native.TeePlugin{},
@@ -46,6 +50,11 @@ func defaultNativePlugins() []plugins.Plugin {
 		native.AwkPlugin{},
 		native.ColumnPlugin{},
 		native.XargsPlugin{},
+		native.RevPlugin{},
+		native.PastePlugin{},
+		native.NlPlugin{},
+		native.FoldPlugin{},
+		native.ShufPlugin{},
 
 		// data tools
 		native.JqPlugin{},
@@ -93,6 +102,8 @@ func defaultNativePlugins() []plugins.Plugin {
 		native.EnvsubstPlugin{},
 
 		// shell / session
+		native.TruePlugin{},
+		native.FalsePlugin{},
 		native.WatchPlugin{},
 		native.ReadPlugin{},
 		native.SourcePlugin{},
@@ -108,6 +119,7 @@ func defaultNativePlugins() []plugins.Plugin {
 		native.WhoamiPlugin{},
 		native.IdPlugin{},
 		native.HostnamePlugin{},
+		native.UnamePlugin{},
 
 		// terminal / help
 		native.ClearPlugin{},
