@@ -91,6 +91,7 @@ func defaultNativePlugins() []plugins.Plugin {
 
 		// network
 		native.CurlPlugin{},
+		native.NcPlugin{},
 		native.SSHPlugin{},
 
 		// version control
