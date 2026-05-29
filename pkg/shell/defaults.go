@@ -106,6 +106,7 @@ func defaultNativePlugins() []plugins.Plugin {
 		native.TruePlugin{},
 		native.FalsePlugin{},
 		native.WatchPlugin{},
+		native.TimePlugin{},
 		native.ReadPlugin{},
 		native.SourcePlugin{},
 		native.DotPlugin{},
