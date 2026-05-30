@@ -93,6 +93,7 @@ func defaultNativePlugins() []plugins.Plugin {
 		native.CurlPlugin{},
 		native.NcPlugin{},
 		native.SSHPlugin{},
+		native.LsofPlugin{},
 
 		// version control
 		nativegit.GitPlugin{},
