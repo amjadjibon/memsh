@@ -11,6 +11,8 @@ import (
 	"mvdan.cc/sh/v3/interp"
 )
 
+// TreePlugin renders directory contents as an ASCII tree, operating on the virtual filesystem.
+// Supports depth limiting (-L), hidden entries (-a), directories only (-d), and full paths (-f).
 type TreePlugin struct{}
 
 func (TreePlugin) Name() string        { return "tree" }
