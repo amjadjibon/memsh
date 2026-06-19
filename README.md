@@ -222,6 +222,7 @@ sh.Run(ctx, "yq .host /config.yaml") // localhost
 | `sqlite3` | SQLite database shell |
 | `ssh` | Connect to a remote memsh server |
 | `tar` | Archive files |
+| `tree` | Display directory contents as an ASCII tree (`-L`, `-a`, `-d`, `-f`) |
 | `tput`, `stty` | Terminal control stubs |
 | `yq` | Command-line YAML/JSON processor |
 | `zip`, `unzip` | Compress/decompress zip files |
@@ -510,40 +511,6 @@ file1.txt  file2.txt
 Cwd: /home/user/data
 ```
 
-### Built-in Agent (`memsh agent`)
-
-`memsh agent` runs a ReAct loop: the LLM thinks, calls the `memsh` tool, observes results, and repeats until the task is done. After each response it pauses for your review.
-
-Provider is inferred from the model name:
-
-| Model prefix | Provider | API key env var |
-|---|---|---|
-| `gpt-*` | OpenAI | `OPENAI_API_KEY` |
-| `claude-*` | Anthropic | `ANTHROPIC_API_KEY` |
-| `gemini-*` | Google | `GOOGLE_API_KEY` |
-| `grok-*` | xAI | `XAI_API_KEY` |
-| any | OpenAI-compatible | `--base-url` + `--api-key` |
-
-```bash
-# Interactive TUI (human-in-the-loop)
-memsh agent --model claude-opus-4-5
-memsh agent --model gpt-4o
-memsh agent --model gemini-2.0-flash
-memsh agent --model grok-3
-
-# Single query, non-interactive
-memsh agent --model claude-opus-4-5 \
-  --query "create a CSV of 10 random users and compute average age with awk"
-
-# With WASM plugins (Python/Ruby/PHP)
-memsh agent --model gpt-4o --wasm
-
-# Explicit API key and base URL (any OpenAI-compatible endpoint)
-memsh agent --model my-model --api-key sk-xxx --base-url https://my-provider/v1
-```
-
-The agent uses an isolated `afero.MemMapFs` — nothing written during the session touches your real filesystem.
-
 ## Configuration
 
 `~/.memsh/config.toml` is loaded at startup (missing file = defaults):
@@ -608,6 +575,7 @@ make release TAG=v1.0.0
 ```
 
 The `make release` command will:
+
 1. **Commit and push any uncommitted changes** (prepares for release)
 2. **Clean the `dist/` directory** (removes old build artifacts)
 3. Clean build artifacts (bin/ and *.wasm files)
@@ -617,6 +585,7 @@ The `make release` command will:
 7. **Generate and push the Homebrew cask** automatically via goreleaser to [`homebrew-memsh`](https://github.com/amjadjibon/homebrew-memsh)
 
 After release, users can install via:
+
 ```bash
 brew tap amjadjibon/memsh
 brew install memsh
