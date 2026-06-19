@@ -157,4 +157,99 @@ func TestTree(t *testing.T) {
 			t.Errorf("error %q should mention the path 'nonexistent'", err.Error())
 		}
 	})
+
+	t.Run("path is a file not a directory", func(t *testing.T) {
+		fs := afero.NewMemMapFs()
+		afero.WriteFile(fs, "/root/file.txt", []byte(""), 0o644)
+		var buf strings.Builder
+		s := NewTestShell(t, &buf, shell.WithFS(fs))
+
+		err := s.Run(ctx, "tree /root/file.txt")
+		if err == nil {
+			t.Fatal("expected error when path is a file, got nil")
+		}
+		if !strings.Contains(err.Error(), "Not a directory") {
+			t.Errorf("error %q should mention 'Not a directory'", err.Error())
+		}
+	})
+
+	t.Run("-L missing argument", func(t *testing.T) {
+		fs := afero.NewMemMapFs()
+		fs.MkdirAll("/root", 0o755)
+		var buf strings.Builder
+		s := NewTestShell(t, &buf, shell.WithFS(fs))
+
+		err := s.Run(ctx, "tree -L")
+		if err == nil {
+			t.Fatal("expected error for missing -L argument, got nil")
+		}
+		if !strings.Contains(err.Error(), "-L") {
+			t.Errorf("error %q should mention '-L'", err.Error())
+		}
+	})
+
+	t.Run("-L invalid non-numeric argument", func(t *testing.T) {
+		fs := afero.NewMemMapFs()
+		fs.MkdirAll("/root", 0o755)
+		var buf strings.Builder
+		s := NewTestShell(t, &buf, shell.WithFS(fs))
+
+		err := s.Run(ctx, "tree -L abc /root")
+		if err == nil {
+			t.Fatal("expected error for non-numeric -L value, got nil")
+		}
+		if !strings.Contains(err.Error(), "abc") {
+			t.Errorf("error %q should mention the invalid value 'abc'", err.Error())
+		}
+	})
+
+	t.Run("-L zero is invalid", func(t *testing.T) {
+		fs := afero.NewMemMapFs()
+		fs.MkdirAll("/root", 0o755)
+		var buf strings.Builder
+		s := NewTestShell(t, &buf, shell.WithFS(fs))
+
+		err := s.Run(ctx, "tree -L 0 /root")
+		if err == nil {
+			t.Fatal("expected error for -L 0, got nil")
+		}
+	})
+
+	t.Run("unknown flag returns error", func(t *testing.T) {
+		fs := afero.NewMemMapFs()
+		fs.MkdirAll("/root", 0o755)
+		var buf strings.Builder
+		s := NewTestShell(t, &buf, shell.WithFS(fs))
+
+		err := s.Run(ctx, "tree -z /root")
+		if err == nil {
+			t.Fatal("expected error for unknown flag -z, got nil")
+		}
+		if !strings.Contains(err.Error(), "z") {
+			t.Errorf("error %q should mention the invalid flag 'z'", err.Error())
+		}
+	})
+
+	t.Run("combined flags -ad", func(t *testing.T) {
+		fs := afero.NewMemMapFs()
+		fs.MkdirAll("/root/.hidden_dir", 0o755)
+		afero.WriteFile(fs, "/root/.hidden_file", []byte(""), 0o644)
+		afero.WriteFile(fs, "/root/visible.txt", []byte(""), 0o644)
+		var buf strings.Builder
+		s := NewTestShell(t, &buf, shell.WithFS(fs))
+
+		if err := s.Run(ctx, "tree -ad /root"); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		out := buf.String()
+		if !strings.Contains(out, ".hidden_dir") {
+			t.Errorf("output %q missing '.hidden_dir'", out)
+		}
+		if strings.Contains(out, ".hidden_file") {
+			t.Errorf("output %q should not contain '.hidden_file' with -d", out)
+		}
+		if strings.Contains(out, "visible.txt") {
+			t.Errorf("output %q should not contain 'visible.txt' with -d", out)
+		}
+	})
 }
