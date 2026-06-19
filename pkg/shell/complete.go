@@ -8,17 +8,14 @@ import (
 	"github.com/spf13/afero"
 )
 
-// sanitizePath cleans a user-provided path and ensures it cannot traverse
-// above the virtual filesystem root. Returns ("", false) if the path is
-// unsafe.
+// sanitizePath cleans a user-provided path and verifies it stays within the
+// virtual filesystem root ("/"). Returns ("", false) if the path is unsafe.
 func sanitizePath(p string) (string, bool) {
+	const fsRoot = "/"
 	p = filepath.Clean(p)
-	if !filepath.IsAbs(p) {
-		return "", false
-	}
-	// filepath.Clean already resolves ".." sequences, but double-check
-	// that the result doesn't try to escape root.
-	if p == ".." || strings.HasPrefix(p, "../") {
+	// Resolve relative to the FS root and confirm the result is still within it.
+	rel, err := filepath.Rel(fsRoot, p)
+	if err != nil || strings.HasPrefix(rel, "..") {
 		return "", false
 	}
 	return p, true
