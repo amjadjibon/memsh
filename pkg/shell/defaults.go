@@ -28,6 +28,7 @@ func defaultNativePlugins() []plugins.Plugin {
 		native.StatPlugin{},
 		native.DiffPlugin{},
 		native.FindPlugin{},
+		native.TreePlugin{},
 		native.DuPlugin{},
 		native.DfPlugin{},
 		native.MktempPlugin{},
