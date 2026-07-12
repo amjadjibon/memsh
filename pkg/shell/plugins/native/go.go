@@ -47,11 +47,20 @@ func (GoPlugin) Run(ctx context.Context, args []string) error {
 	hc := shinterp.HandlerCtx(ctx)
 	sc := plugins.ShellCtx(ctx)
 
-	// No subcommand: read Go source from stdin.
+	// No subcommand: print usage in interactive use (TTY). When stdin is a pipe
+	// with source, run it (e.g. echo 'fmt.Println(1)' | go). Never block on a TTY.
 	if len(args) < 2 {
+		if isTerminalReader(hc.Stdin) {
+			fmt.Fprintln(hc.Stdout, GoPlugin{}.Usage())
+			return nil
+		}
 		data, err := io.ReadAll(hc.Stdin)
 		if err != nil {
 			return fmt.Errorf("go: read stdin: %w", err)
+		}
+		if strings.TrimSpace(string(data)) == "" {
+			fmt.Fprintln(hc.Stdout, GoPlugin{}.Usage())
+			return nil
 		}
 		return runGoSource(hc.Stdout, hc.Stderr, string(data), "<stdin>")
 	}
@@ -343,6 +352,20 @@ func evalGoSource(src, label string) (err error) {
 	i.AutoImportPackages()
 	_, err = i.Eval(label, src)
 	return err
+}
+
+// isTerminalReader reports whether r is an interactive terminal (char device).
+// Used so bare `go` prints help instead of blocking on stdin in the REPL.
+func isTerminalReader(r io.Reader) bool {
+	f, ok := r.(*os.File)
+	if !ok {
+		return false
+	}
+	fi, err := f.Stat()
+	if err != nil {
+		return false
+	}
+	return fi.Mode()&os.ModeCharDevice != 0
 }
 
 // ensure GoPlugin satisfies plugins.PluginInfo at compile time.
