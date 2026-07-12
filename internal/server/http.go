@@ -24,6 +24,7 @@ type Config struct {
 	Timeout      time.Duration  // Per-request execution timeout
 	CORSOrigin   string         // CORS allowed origin (empty = no CORS)
 	APIKey       string         // API key for Bearer authentication (empty = no auth)
+	TrustProxy   bool           // Trust X-Forwarded-For when true (rate limiting)
 	MaxSessions  int            // Maximum concurrent sessions (0 = unlimited)
 	SessionStore *session.Store // Session store for persistence
 	BaseOpts     []shell.Option // Optional explicit base shell options
@@ -72,7 +73,7 @@ func New(cfg Config) (*http.Server, error) {
 	}
 
 	// Per-IP rate limit on mutating / expensive endpoints.
-	h = RateLimitMiddleware(h, 120, time.Minute)
+	h = RateLimitMiddleware(h, 120, time.Minute, cfg.TrustProxy)
 
 	// Security headers (CSP, etc.).
 	h = SecurityHeadersMiddleware(h)

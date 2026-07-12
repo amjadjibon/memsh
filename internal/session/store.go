@@ -34,6 +34,35 @@ func newSessionID() string {
 	return hex.EncodeToString(b)
 }
 
+// ValidSessionID reports whether id has enough entropy to be a session key
+// (16–64 hex chars). Short or non-hex IDs are rejected to reduce guessing.
+func ValidSessionID(id string) bool {
+	n := len(id)
+	if n < 16 || n > 64 {
+		return false
+	}
+	for i := 0; i < n; i++ {
+		c := id[i]
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') && (c < 'A' || c > 'F') {
+			return false
+		}
+	}
+	return true
+}
+
+// GetExisting returns a session only if it already exists (does not create).
+func (st *Store) GetExisting(id string) (*Entry, bool) {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	e, ok := st.entries[id]
+	if !ok {
+		return nil, false
+	}
+	e.LastUse = time.Now()
+	st.persistLocked(id, e)
+	return e, true
+}
+
 // Entry holds the persistent state (filesystem + cwd) shared across
 // requests. Each request still creates its own shell.Shell pointing at the
 // session's FS, so per-request I/O capture works correctly.

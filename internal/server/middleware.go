@@ -96,9 +96,10 @@ func CORSMiddleware(next http.Handler, allowedOrigin string) http.Handler {
 	})
 }
 
-// RateLimitMiddleware applies a simple per-IP token bucket to expensive routes.
-// limit is max requests per window duration.
-func RateLimitMiddleware(next http.Handler, limit int, window time.Duration) http.Handler {
+// RateLimitMiddleware applies a simple per-IP fixed window to expensive routes.
+// limit is max requests per window duration. When trustProxy is false, only
+// RemoteAddr is used (X-Forwarded-For is ignored).
+func RateLimitMiddleware(next http.Handler, limit int, window time.Duration, trustProxy bool) http.Handler {
 	if limit <= 0 {
 		limit = 60
 	}
@@ -111,6 +112,7 @@ func RateLimitMiddleware(next http.Handler, limit int, window time.Duration) htt
 	}
 	var mu sync.Mutex
 	buckets := make(map[string]*bucket)
+	var lastPrune time.Time
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Skip cheap read-only endpoints.
@@ -118,9 +120,18 @@ func RateLimitMiddleware(next http.Handler, limit int, window time.Duration) htt
 			next.ServeHTTP(w, r)
 			return
 		}
-		ip := clientIP(r)
+		ip := clientIP(r, trustProxy)
 		now := time.Now()
 		mu.Lock()
+		// Prune expired buckets periodically to bound memory.
+		if lastPrune.IsZero() || now.Sub(lastPrune) > window {
+			for k, b := range buckets {
+				if now.After(b.reset) {
+					delete(buckets, k)
+				}
+			}
+			lastPrune = now
+		}
 		b, ok := buckets[ip]
 		if !ok || now.After(b.reset) {
 			b = &bucket{count: 0, reset: now.Add(window)}
@@ -137,10 +148,12 @@ func RateLimitMiddleware(next http.Handler, limit int, window time.Duration) htt
 	})
 }
 
-func clientIP(r *http.Request) string {
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		parts := strings.Split(xff, ",")
-		return strings.TrimSpace(parts[0])
+func clientIP(r *http.Request, trustProxy bool) string {
+	if trustProxy {
+		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+			parts := strings.Split(xff, ",")
+			return strings.TrimSpace(parts[0])
+		}
 	}
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {

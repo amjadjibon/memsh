@@ -252,3 +252,50 @@ func TestStoreSnapshot(t *testing.T) {
 		t.Fatalf("Snapshot returned %d entries, want 2", len(snaps))
 	}
 }
+
+
+func TestValidSessionID(t *testing.T) {
+	if !session.ValidSessionID("abcdef0123456789") {
+		t.Error("expected valid hex id")
+	}
+	if session.ValidSessionID("to-delete") {
+		t.Error("expected invalid weak id")
+	}
+	if session.ValidSessionID("new") {
+		t.Error("new is not a valid client id format")
+	}
+	if session.ValidSessionID("aaaaaaaaaaaaaaa") { // 15 chars
+		t.Error("expected too short")
+	}
+	if session.ValidSessionID("zzzzzzzzzzzzzzzz") {
+		t.Error("non-hex should be invalid")
+	}
+}
+
+func TestStoreReplaceMaxEntries(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	st := session.New(ctx, time.Hour, 1)
+	if !st.Replace("aaaaaaaaaaaaaaaa", nil, "/") {
+		t.Fatal("first Replace should succeed")
+	}
+	if st.Replace("bbbbbbbbbbbbbbbb", nil, "/") {
+		t.Fatal("second Replace should fail at max")
+	}
+	if !st.Replace("aaaaaaaaaaaaaaaa", nil, "/x") {
+		t.Fatal("overwrite should succeed")
+	}
+}
+
+func TestStoreGetExisting(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	st := session.New(ctx, time.Hour, 10)
+	if _, ok := st.GetExisting("aaaaaaaaaaaaaaaa"); ok {
+		t.Fatal("expected missing")
+	}
+	st.Get("aaaaaaaaaaaaaaaa")
+	if _, ok := st.GetExisting("aaaaaaaaaaaaaaaa"); !ok {
+		t.Fatal("expected existing")
+	}
+}

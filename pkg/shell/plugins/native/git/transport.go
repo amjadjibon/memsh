@@ -51,9 +51,11 @@ func withPolicyHTTPTransport(dial dialFunc, fn func() error) error {
 	return fn()
 }
 
-// checkRemoteURL ensures a git remote URL is allowed by the network dialer
-// before go-git opens its own transport (covers non-HTTP schemes and preflight).
-func checkRemoteURL(ctx context.Context, dial dialFunc, rawURL string) error {
+// checkRemoteURL validates a git remote before network I/O.
+// Local paths are allowed. SSH/scp remotes are rejected (go-git's SSH
+// transport cannot be scoped to NetworkDialContext without a global install).
+// HTTP(S) remotes are enforced by withPolicyHTTPTransport — no preflight dial.
+func checkRemoteURL(_ context.Context, dial dialFunc, rawURL string) error {
 	if dial == nil {
 		return fmt.Errorf("network dialer not configured")
 	}
@@ -61,57 +63,36 @@ func checkRemoteURL(ctx context.Context, dial dialFunc, rawURL string) error {
 	if rawURL == "" {
 		return fmt.Errorf("empty remote URL")
 	}
-	// Local paths / file:// stay inside the virtual FS path of go-git; no host dial.
+	// Local paths / file:// stay inside the virtual FS; no host dial.
 	if strings.HasPrefix(rawURL, "/") || strings.HasPrefix(rawURL, "./") || strings.HasPrefix(rawURL, "../") ||
 		strings.HasPrefix(rawURL, "file://") {
 		return nil
 	}
 
-	host, port, err := remoteHostPort(rawURL)
-	if err != nil {
-		return err
-	}
-	addr := net.JoinHostPort(host, port)
-	conn, err := dial(ctx, "tcp", addr)
-	if err != nil {
-		return fmt.Errorf("network policy: %w", err)
-	}
-	_ = conn.Close()
-	return nil
-}
-
-func remoteHostPort(rawURL string) (host, port string, err error) {
 	// scp-like: git@host:path/repo.git
 	if !strings.Contains(rawURL, "://") {
-		if at := strings.Index(rawURL, "@"); at >= 0 {
-			rest := rawURL[at+1:]
-			if colon := strings.Index(rest, ":"); colon >= 0 {
-				return rest[:colon], "22", nil
-			}
+		if strings.Contains(rawURL, "@") && strings.Contains(rawURL, ":") {
+			return fmt.Errorf("ssh remotes are disabled; use https:// instead")
 		}
-		return "", "", fmt.Errorf("unsupported git remote URL %q", rawURL)
+		// Bare relative path into virtual FS.
+		return nil
 	}
 
 	u, err := url.Parse(rawURL)
 	if err != nil {
-		return "", "", fmt.Errorf("invalid git remote URL: %w", err)
+		return fmt.Errorf("invalid git remote URL: %w", err)
 	}
-	host = u.Hostname()
-	if host == "" {
-		return "", "", fmt.Errorf("git remote URL missing host: %q", rawURL)
-	}
-	port = u.Port()
-	if port == "" {
-		switch strings.ToLower(u.Scheme) {
-		case "http":
-			port = "80"
-		case "https":
-			port = "443"
-		case "ssh", "git":
-			port = "22"
-		default:
-			port = "443"
+	switch strings.ToLower(u.Scheme) {
+	case "http", "https":
+		if u.Hostname() == "" {
+			return fmt.Errorf("git remote URL missing host: %q", rawURL)
 		}
+		return nil
+	case "ssh", "git":
+		return fmt.Errorf("ssh remotes are disabled; use https:// instead")
+	case "file":
+		return nil
+	default:
+		return fmt.Errorf("unsupported git remote scheme %q; use https://", u.Scheme)
 	}
-	return host, port, nil
 }

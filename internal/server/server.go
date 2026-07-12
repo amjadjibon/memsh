@@ -119,8 +119,9 @@ func (h *Handler) handleRun(w http.ResponseWriter, r *http.Request) {
 
 	// Session attachment:
 	//   - missing header → ephemeral (no store)
-	//   - "new" → server-minted ID
-	//   - other → get-or-create that ID
+	//   - "new" → server-minted high-entropy ID
+	//   - existing high-entropy ID → attach or create (first use)
+	//   - weak/guessable IDs rejected
 	switch {
 	case sessionID == "":
 		// ephemeral
@@ -132,11 +133,20 @@ func (h *Handler) handleRun(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	default:
-		var ok bool
-		entry, ok = h.Store.Get(sessionID)
-		if !ok {
-			WriteJSON(w, http.StatusTooManyRequests, runResponse{Error: "maximum number of sessions reached"})
+		if !session.ValidSessionID(sessionID) {
+			WriteJSON(w, http.StatusBadRequest, runResponse{Error: "invalid session id: use 16-64 hex chars or 'new'"})
 			return
+		}
+		// Prefer attach; create only if missing (web UI generates random IDs).
+		if e, ok := h.Store.GetExisting(sessionID); ok {
+			entry = e
+		} else {
+			var ok bool
+			entry, ok = h.Store.Get(sessionID)
+			if !ok {
+				WriteJSON(w, http.StatusTooManyRequests, runResponse{Error: "maximum number of sessions reached"})
+				return
+			}
 		}
 	}
 
@@ -258,11 +268,13 @@ func (h *Handler) handleSessionDelete(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) handleSnapshotGet(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	entry, ok := h.Store.Get(id)
+	entry, ok := h.Store.GetExisting(id)
 	if !ok {
 		WriteJSON(w, http.StatusNotFound, map[string]string{"error": "session not found"})
 		return
 	}
+	entry.ExecMu.Lock()
+	defer entry.ExecMu.Unlock()
 	snap, err := shell.TakeSnapshot(entry.Fs, entry.Cwd)
 	if err != nil {
 		log.Printf("memsh serve: snapshot export failed: %v", err)
@@ -308,6 +320,9 @@ func (h *Handler) handleSnapshotPost(w http.ResponseWriter, r *http.Request) {
 		b := make([]byte, 16)
 		_, _ = rand.Read(b)
 		id = fmt.Sprintf("%x", b)
+	} else if !session.ValidSessionID(id) {
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid session id: use 16-64 hex chars or 'new'"})
+		return
 	}
 
 	if ok := h.Store.Replace(id, fs, cwd); !ok {
@@ -339,9 +354,14 @@ func (h *Handler) handleComplete(w http.ResponseWriter, r *http.Request) {
 	fs := afero.NewMemMapFs()
 	cwd := "/"
 	if sessionID := r.Header.Get("X-Session-ID"); sessionID != "" {
-		if entry, ok := h.Store.Get(sessionID); ok {
+		if entry, ok := h.Store.GetExisting(sessionID); ok {
+			entry.ExecMu.Lock()
+			defer entry.ExecMu.Unlock()
 			fs = entry.Fs
 			cwd = entry.Cwd
+			result := shell.Complete(req.Input, req.Cursor, fs, cwd, shell.DefaultCommands())
+			WriteJSON(w, http.StatusOK, result)
+			return
 		}
 	}
 

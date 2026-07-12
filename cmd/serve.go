@@ -75,6 +75,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	timeout, _ := cmd.Flags().GetDuration("timeout")
 	corsOrigin, _ := cmd.Flags().GetString("cors-origin")
 	apiKey, _ := cmd.Flags().GetString("api-key")
+	trustProxy, _ := cmd.Flags().GetBool("trust-proxy")
 	maxSessions, _ := cmd.Flags().GetInt("max-sessions")
 	maxSessionFiles, _ := cmd.Flags().GetInt("session-max-files")
 	maxSessionBytes, _ := cmd.Flags().GetInt64("session-max-bytes")
@@ -140,6 +141,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		Timeout:      timeout,
 		CORSOrigin:   corsOrigin,
 		APIKey:       apiKey,
+		TrustProxy:   trustProxy,
 		MaxSessions:  maxSessions,
 		SessionStore: store,
 		BaseOpts:     baseOpts,
@@ -225,13 +227,18 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	return nil
 }
 
+// isLoopbackAddr reports whether addr binds only loopback.
+// Empty host, 0.0.0.0, and :: mean all interfaces — not loopback.
 func isLoopbackAddr(addr string) bool {
 	host := addr
 	if h, _, err := net.SplitHostPort(addr); err == nil {
 		host = h
 	}
-	host = strings.TrimSpace(host)
-	if host == "" || host == "localhost" || host == "127.0.0.1" || host == "::1" {
+	host = strings.Trim(strings.TrimSpace(host), "[]")
+	if host == "" || host == "0.0.0.0" || host == "::" || host == "*" {
+		return false
+	}
+	if host == "localhost" || host == "127.0.0.1" || host == "::1" {
 		return true
 	}
 	ip := net.ParseIP(host)
@@ -259,6 +266,7 @@ func init() {
 	serveCmd.Flags().Duration("timeout", 30*time.Second, "Per-request execution timeout (minimum 5s)")
 	serveCmd.Flags().String("cors-origin", "", "Allowed CORS origin (e.g. 'https://example.com'). Empty = no CORS headers.")
 	serveCmd.Flags().String("api-key", "", "API key for authentication. When set, mutating endpoints require 'Authorization: Bearer <key>'.")
+	serveCmd.Flags().Bool("trust-proxy", false, "Trust X-Forwarded-For for client IP (rate limiting). Enable only behind a trusted reverse proxy.")
 	serveCmd.Flags().Int("max-sessions", 100, "Maximum number of concurrent sessions (0 = unlimited)")
 	serveCmd.Flags().String("session-store", "", "Directory path for durable session persistence (empty = in-memory only)")
 	serveCmd.Flags().Int("session-max-files", 0, "Maximum files per session filesystem (0 = unlimited)")

@@ -126,7 +126,7 @@ func TestRunEndpointWithSession(t *testing.T) {
 	// First request creates the session.
 	req1, _ := http.NewRequest("POST", srv.URL+"/run", strings.NewReader(`{"script":"mkdir /mydir"}`))
 	req1.Header.Set("Content-Type", "application/json")
-	req1.Header.Set("X-Session-ID", "test-session-1")
+	req1.Header.Set("X-Session-ID", "aaaaaaaaaaaaaaaa")
 	resp1, err := http.DefaultClient.Do(req1)
 	if err != nil {
 		t.Fatalf("POST /run: %v", err)
@@ -140,7 +140,7 @@ func TestRunEndpointWithSession(t *testing.T) {
 	// Second request with same session should see /mydir.
 	req2, _ := http.NewRequest("POST", srv.URL+"/run", strings.NewReader(`{"script":"ls /"}`))
 	req2.Header.Set("Content-Type", "application/json")
-	req2.Header.Set("X-Session-ID", "test-session-1")
+	req2.Header.Set("X-Session-ID", "aaaaaaaaaaaaaaaa")
 	resp2, err := http.DefaultClient.Do(req2)
 	if err != nil {
 		t.Fatalf("POST /run: %v", err)
@@ -181,12 +181,12 @@ func TestSessionDeleteEndpoint(t *testing.T) {
 	// Create a session by running a command.
 	req, _ := http.NewRequest("POST", srv.URL+"/run", strings.NewReader(`{"script":"echo hi"}`))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Session-ID", "to-delete")
+	req.Header.Set("X-Session-ID", "bbbbbbbbbbbbbbbb")
 	resp, _ := http.DefaultClient.Do(req)
 	resp.Body.Close()
 
 	// Delete the session.
-	delReq, _ := http.NewRequest("DELETE", srv.URL+"/session/to-delete", nil)
+	delReq, _ := http.NewRequest("DELETE", srv.URL+"/session/bbbbbbbbbbbbbbbb", nil)
 	delResp, err := http.DefaultClient.Do(delReq)
 	if err != nil {
 		t.Fatalf("DELETE /session: %v", err)
@@ -207,12 +207,12 @@ func TestSnapshotGetEndpoint(t *testing.T) {
 	// Create session with some files.
 	req, _ := http.NewRequest("POST", srv.URL+"/run", strings.NewReader(`{"script":"echo data > /file.txt"}`))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Session-ID", "snap-test")
+	req.Header.Set("X-Session-ID", "cccccccccccccccc")
 	resp, _ := http.DefaultClient.Do(req)
 	resp.Body.Close()
 
 	// Get snapshot.
-	getReq, _ := http.NewRequest("GET", srv.URL+"/session/snap-test/snapshot", nil)
+	getReq, _ := http.NewRequest("GET", srv.URL+"/session/cccccccccccccccc/snapshot", nil)
 	getResp, err := http.DefaultClient.Do(getReq)
 	if err != nil {
 		t.Fatalf("GET snapshot: %v", err)
@@ -238,11 +238,11 @@ func TestSnapshotPostEndpoint(t *testing.T) {
 	// Create session, write a file, export snapshot.
 	req1, _ := http.NewRequest("POST", srv.URL+"/run", strings.NewReader(`{"script":"echo imported > /test.txt"}`))
 	req1.Header.Set("Content-Type", "application/json")
-	req1.Header.Set("X-Session-ID", "import-src")
+	req1.Header.Set("X-Session-ID", "dddddddddddddddd")
 	resp1, _ := http.DefaultClient.Do(req1)
 	resp1.Body.Close()
 
-	getReq, _ := http.NewRequest("GET", srv.URL+"/session/import-src/snapshot", nil)
+	getReq, _ := http.NewRequest("GET", srv.URL+"/session/dddddddddddddddd/snapshot", nil)
 	getResp, _ := http.DefaultClient.Do(getReq)
 	snapData, _ := io.ReadAll(getResp.Body)
 	getResp.Body.Close()
@@ -328,5 +328,51 @@ func TestIndexNotFound(t *testing.T) {
 
 	if resp.StatusCode != 404 {
 		t.Errorf("status = %d, want 404", resp.StatusCode)
+	}
+}
+
+func TestInvalidSessionIDRejected(t *testing.T) {
+	h, cancel := newTestServer(t)
+	defer cancel()
+	srv := httptest.NewServer(mux(h))
+	defer srv.Close()
+
+	req, _ := http.NewRequest("POST", srv.URL+"/run", strings.NewReader(`{"script":"echo hi"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Session-ID", "weak")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST /run: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 400 {
+		t.Errorf("status = %d, want 400", resp.StatusCode)
+	}
+}
+
+func TestSessionIDNewMints(t *testing.T) {
+	h, cancel := newTestServer(t)
+	defer cancel()
+	srv := httptest.NewServer(mux(h))
+	defer srv.Close()
+
+	req, _ := http.NewRequest("POST", srv.URL+"/run", strings.NewReader(`{"script":"echo hi"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Session-ID", "new")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST /run: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var result map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		t.Fatal(err)
+	}
+	sid, _ := result["session_id"].(string)
+	if len(sid) < 16 {
+		t.Errorf("session_id = %q, want minted id", sid)
 	}
 }
