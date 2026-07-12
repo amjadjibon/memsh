@@ -108,17 +108,21 @@ doneFlags:
 		proto = "udp"
 	}
 
-	// Build a dialer that respects the shell's network policy.
+	// Build a dialer that respects the shell's network policy. Fail closed
+	// when no policy-enforced dialer is available.
 	dial := func(ctx context.Context, network, addr string) (net.Conn, error) {
-		if sc.NetworkDialContext != nil {
-			return sc.NetworkDialContext(ctx, network, addr)
+		if sc.NetworkDialContext == nil {
+			return nil, fmt.Errorf("network dialer not configured")
 		}
-		var d net.Dialer
-		return d.DialContext(ctx, network, addr)
+		return sc.NetworkDialContext(ctx, network, addr)
 	}
 
 	// ── listen mode ──────────────────────────────────────────────────────────
 	if listen {
+		if !sc.AllowHostListen {
+			fmt.Fprintln(hc.Stderr, "nc: listen mode disabled (host port binding not allowed)")
+			return interp.ExitStatus(1)
+		}
 		return ncListen(ctx, hc, proto, positional, timeoutSecs, verbose, keepOpen, noDNS)
 	}
 

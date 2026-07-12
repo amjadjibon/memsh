@@ -48,6 +48,7 @@ type Shell struct {
 
 	wasmEnabled       bool
 	allowExternalCmds bool
+	allowHostListen   bool
 	inheritEnv        bool
 
 	pluginFilter map[string]struct{}
@@ -240,6 +241,7 @@ func (s *Shell) execHandler(next interp.ExecHandlerFunc) interp.ExecHandlerFunc 
 				}
 				return s.networkDialer.DialContext(ctx, networkName, address)
 			},
+			AllowHostListen: s.allowHostListen,
 		})
 
 		if fn, ok := s.builtins[args[0]]; ok {

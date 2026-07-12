@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -155,6 +156,9 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	// Start SSH server if requested.
 	var sshSrv *internalssh.Server
 	if sshEnabled {
+		if strings.TrimSpace(apiKey) == "" {
+			return fmt.Errorf("memsh serve: --ssh requires --api-key (refusing unauthenticated SSH)")
+		}
 		var sshErr error
 		sshSrv, sshErr = internalssh.New(internalssh.Config{
 			Addr:        sshAddr,
@@ -190,6 +194,9 @@ func runServe(cmd *cobra.Command, _ []string) error {
 
 	fmt.Fprintf(os.Stderr, "memsh serve: listening on %s  (session TTL %s, max sessions %d, timeout %s)\n",
 		addr, ttl, maxSessions, timeout)
+	if !isLoopbackAddr(addr) && strings.TrimSpace(apiKey) == "" {
+		fmt.Fprintln(os.Stderr, "memsh serve: WARNING: listening on a non-loopback address without --api-key; remote clients can run unauthenticated commands")
+	}
 	if sessionStorePath != "" {
 		fmt.Fprintf(os.Stderr, "memsh serve: durable session store: %s\n", sessionStorePath)
 	}
@@ -216,6 +223,19 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("memsh serve: %w", err)
 	}
 	return nil
+}
+
+func isLoopbackAddr(addr string) bool {
+	host := addr
+	if h, _, err := net.SplitHostPort(addr); err == nil {
+		host = h
+	}
+	host = strings.TrimSpace(host)
+	if host == "" || host == "localhost" || host == "127.0.0.1" || host == "::1" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 // buildShellOpts converts the loaded config into shell options.
@@ -245,7 +265,7 @@ func init() {
 	serveCmd.Flags().Int64("session-max-bytes", 0, "Maximum total bytes per session filesystem (0 = unlimited)")
 	serveCmd.Flags().Duration("session-max-runtime", 0, "Maximum cumulative command runtime per session (0 = unlimited)")
 	serveCmd.Flags().Bool("ssh", false, "Enable SSH server for remote shell access")
-	serveCmd.Flags().String("ssh-addr", ":2222", "SSH server listen address (used with --ssh); binds all interfaces so both localhost and 127.0.0.1 work")
+	serveCmd.Flags().String("ssh-addr", "127.0.0.1:2222", "SSH server listen address (used with --ssh); default binds localhost only")
 	serveCmd.Flags().String("ssh-host-key", "", "Path to persist the SSH host key (default ~/.memsh/ssh_host_key); stable key avoids known_hosts warnings")
 	addNetworkFlags(serveCmd.Flags(), &serveNetFlags)
 	rootCmd.AddCommand(serveCmd)

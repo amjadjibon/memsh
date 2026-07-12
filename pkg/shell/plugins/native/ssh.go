@@ -125,11 +125,22 @@ func (SSHPlugin) Run(ctx context.Context, args []string) error {
 		Timeout:         15 * time.Second,
 	}
 
-	client, err := gossh.Dial("tcp", addr, cfg)
+	if sc.NetworkDialContext == nil {
+		fmt.Fprintln(hc.Stderr, "ssh: network dialer not configured")
+		return interp.ExitStatus(255)
+	}
+	rawConn, err := sc.NetworkDialContext(ctx, "tcp", addr)
 	if err != nil {
 		fmt.Fprintf(hc.Stderr, "ssh: %s: %v\n", addr, err)
 		return interp.ExitStatus(255)
 	}
+	cc, chans, reqs, err := gossh.NewClientConn(rawConn, addr, cfg)
+	if err != nil {
+		_ = rawConn.Close()
+		fmt.Fprintf(hc.Stderr, "ssh: %s: %v\n", addr, err)
+		return interp.ExitStatus(255)
+	}
+	client := gossh.NewClient(cc, chans, reqs)
 	defer client.Close()
 
 	sess, err := client.NewSession()

@@ -12,6 +12,8 @@ package session
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"log"
 	"os"
@@ -26,6 +28,12 @@ import (
 	"github.com/spf13/afero"
 )
 
+func newSessionID() string {
+	b := make([]byte, 16)
+	_, _ = rand.Read(b)
+	return hex.EncodeToString(b)
+}
+
 // Entry holds the persistent state (filesystem + cwd) shared across
 // requests. Each request still creates its own shell.Shell pointing at the
 // session's FS, so per-request I/O capture works correctly.
@@ -37,6 +45,7 @@ type Entry struct {
 	RcLoaded  bool // true after /.memshrc has been sourced for this session
 	Runtime   time.Duration
 	Network   network.Usage
+	ExecMu    sync.Mutex // serialises shell execution against this session FS
 	CronMu    sync.Mutex // serialises concurrent cron job writes to /.cron_log
 }
 
@@ -147,8 +156,9 @@ func (st *Store) updateLocked(id, cwd string, rcLoaded bool, runtimeDelta time.D
 }
 
 // Replace creates or overwrites a session with the given filesystem and cwd.
-// Used by the snapshot import endpoint.
-func (st *Store) Replace(id string, fs afero.Fs, cwd string) {
+// Used by the snapshot import endpoint. Returns false if creating a new
+// session would exceed maxEntries.
+func (st *Store) Replace(id string, fs afero.Fs, cwd string) bool {
 	st.mu.Lock()
 	defer st.mu.Unlock()
 	now := time.Now()
@@ -160,7 +170,10 @@ func (st *Store) Replace(id string, fs afero.Fs, cwd string) {
 		e.Network = network.Usage{}
 		e.LastUse = now
 		st.persistLocked(id, e)
-		return
+		return true
+	}
+	if st.maxEntries > 0 && len(st.entries) >= st.maxEntries {
+		return false
 	}
 	st.entries[id] = &Entry{
 		Fs:        fs,
@@ -169,6 +182,35 @@ func (st *Store) Replace(id string, fs afero.Fs, cwd string) {
 		LastUse:   now,
 	}
 	st.persistLocked(id, st.entries[id])
+	return true
+}
+
+// Create mints a new session with a cryptographically random ID.
+// Returns ("", nil, false) if the max session limit is reached.
+func (st *Store) Create() (string, *Entry, bool) {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	if st.maxEntries > 0 && len(st.entries) >= st.maxEntries {
+		return "", nil, false
+	}
+	id := newSessionID()
+	// Extremely unlikely collision; retry a few times.
+	for i := 0; i < 5; i++ {
+		if _, exists := st.entries[id]; !exists {
+			break
+		}
+		id = newSessionID()
+	}
+	now := time.Now()
+	e := &Entry{
+		Fs:        afero.NewMemMapFs(),
+		Cwd:       "/",
+		CreatedAt: now,
+		LastUse:   now,
+	}
+	st.entries[id] = e
+	st.persistLocked(id, e)
+	return id, e, true
 }
 
 // Delete removes and discards a session.
@@ -258,6 +300,7 @@ type Snap struct {
 	ID     string
 	Fs     afero.Fs
 	Cwd    string
+	ExecMu *sync.Mutex
 	CronMu *sync.Mutex
 }
 
@@ -271,6 +314,7 @@ func (st *Store) Snapshot() []Snap {
 			ID:     id,
 			Fs:     e.Fs,
 			Cwd:    e.Cwd,
+			ExecMu: &e.ExecMu,
 			CronMu: &e.CronMu,
 		})
 	}

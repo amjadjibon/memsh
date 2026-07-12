@@ -30,9 +30,16 @@ type Policy struct {
 	DenyPrivateRanges bool
 }
 
-// DefaultPolicy returns a permissive policy for backward compatibility.
+// DefaultPolicy returns a permissive policy for library/local use
+// (no destination restrictions). Prefer ServerPolicy for multi-tenant serve.
 func DefaultPolicy() Policy {
 	return Policy{Mode: ModeFull}
+}
+
+// ServerPolicy returns the recommended policy for memsh serve / MCP:
+// full outbound access to public destinations only (private ranges denied).
+func ServerPolicy() Policy {
+	return Policy{Mode: ModeFull, DenyPrivateRanges: true}
 }
 
 // Resolver resolves hostnames to IP addresses.

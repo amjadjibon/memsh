@@ -66,6 +66,12 @@ func runSessionCronJobs(ctx context.Context, t time.Time, ss Snap, baseOpts []sh
 // runCronJob runs a single cron job command inside the session's virtual FS and
 // appends a timestamped log entry (including output) to /.cron_log.
 func runCronJob(ctx context.Context, t time.Time, command string, ss Snap, baseOpts []shell.Option, timeout time.Duration) {
+	// Hold ExecMu for the full job so cron cannot race concurrent /run handlers.
+	if ss.ExecMu != nil {
+		ss.ExecMu.Lock()
+		defer ss.ExecMu.Unlock()
+	}
+
 	var out strings.Builder
 
 	opts := make([]shell.Option, len(baseOpts)+3)

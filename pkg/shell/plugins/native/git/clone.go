@@ -1,6 +1,7 @@
 package git
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"path"
@@ -32,7 +33,7 @@ func repoNameFromURL(rawURL string) string {
 // cmdGitClone clones a remote (or local) repository into the virtual FS.
 //
 //	git clone [--depth <n>] [-b <branch>] [--single-branch] [-n] [--no-checkout] <url> [<directory>]
-func cmdGitClone(w io.Writer, errW io.Writer, fs afero.Fs, cwd string, args []string, getEnv envLookup) error {
+func cmdGitClone(ctx context.Context, w io.Writer, errW io.Writer, fs afero.Fs, cwd string, args []string, getEnv envLookup, dial dialFunc) error {
 	var (
 		rawURL       string
 		destArg      string
@@ -95,6 +96,10 @@ func cmdGitClone(w io.Writer, errW io.Writer, fs afero.Fs, cwd string, args []st
 		return interp.ExitStatus(1)
 	}
 
+	if err := checkRemoteURL(ctx, dial, rawURL); err != nil {
+		return fmt.Errorf("git clone: %w", err)
+	}
+
 	if err := fs.MkdirAll(target, 0o755); err != nil {
 		return fmt.Errorf("git clone: %w", err)
 	}
@@ -116,7 +121,11 @@ func cmdGitClone(w io.Writer, errW io.Writer, fs afero.Fs, cwd string, args []st
 		cloneOpts.ReferenceName = plumbing.NewBranchReferenceName(branch)
 	}
 
-	if _, err := gogit.Clone(storer, wt, cloneOpts); err != nil {
+	err := withPolicyHTTPTransport(dial, func() error {
+		_, cloneErr := gogit.Clone(storer, wt, cloneOpts)
+		return cloneErr
+	})
+	if err != nil {
 		// Remove the partially initialised directory on failure.
 		_ = fs.RemoveAll(target)
 		return fmt.Errorf("git clone: %w", err)

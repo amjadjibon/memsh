@@ -112,45 +112,66 @@ func (h *Handler) handleRun(w http.ResponseWriter, r *http.Request) {
 	copy(opts, h.BaseOpts)
 	opts[len(h.BaseOpts)] = shell.WithStdIO(strings.NewReader(""), &out, &out)
 
-	sessionID := r.Header.Get("X-Session-ID")
+	sessionID := strings.TrimSpace(r.Header.Get("X-Session-ID"))
 	var entry *session.Entry
 	execTimeout := h.Timeout
 	var preRunSnap *shell.Snapshot
-	if sessionID != "" {
+
+	// Session attachment:
+	//   - missing header → ephemeral (no store)
+	//   - "new" → server-minted ID
+	//   - other → get-or-create that ID
+	switch {
+	case sessionID == "":
+		// ephemeral
+	case sessionID == "new":
+		var ok bool
+		sessionID, entry, ok = h.Store.Create()
+		if !ok {
+			WriteJSON(w, http.StatusTooManyRequests, runResponse{Error: "maximum number of sessions reached"})
+			return
+		}
+	default:
 		var ok bool
 		entry, ok = h.Store.Get(sessionID)
 		if !ok {
-			WriteJSON(w, http.StatusTooManyRequests, runResponse{
-				Error: "maximum number of sessions reached",
-			})
+			WriteJSON(w, http.StatusTooManyRequests, runResponse{Error: "maximum number of sessions reached"})
 			return
 		}
+	}
+
+	if entry != nil {
+		// Serialise execution against this session's FS (including cron).
+		entry.ExecMu.Lock()
+		defer entry.ExecMu.Unlock()
+
 		if err := h.Limits.ValidateRuntime(entry.Runtime); err != nil {
-			WriteJSON(w, http.StatusTooManyRequests, runResponse{Error: err.Error(), Cwd: entry.Cwd})
+			WriteJSON(w, http.StatusTooManyRequests, runResponse{Error: err.Error(), Cwd: entry.Cwd, SessionID: sessionID})
 			return
 		}
 		if err := h.Limits.ValidateFS(entry.Fs); err != nil {
-			WriteJSON(w, http.StatusTooManyRequests, runResponse{Error: err.Error(), Cwd: entry.Cwd})
+			WriteJSON(w, http.StatusTooManyRequests, runResponse{Error: err.Error(), Cwd: entry.Cwd, SessionID: sessionID})
 			return
 		}
 		if h.Limits.HasFSLimits() {
 			snap, err := shell.TakeSnapshot(entry.Fs, entry.Cwd)
 			if err != nil {
 				log.Printf("memsh serve: snapshot before run failed: %v", err)
-				WriteJSON(w, http.StatusInternalServerError, runResponse{Error: "internal server error", Cwd: entry.Cwd})
+				WriteJSON(w, http.StatusInternalServerError, runResponse{Error: "internal server error", Cwd: entry.Cwd, SessionID: sessionID})
 				return
 			}
 			preRunSnap = snap
 		}
 		t, err := h.Limits.EffectiveTimeout(h.Timeout, entry.Runtime, MinTimeout)
 		if err != nil {
-			WriteJSON(w, http.StatusTooManyRequests, runResponse{Error: err.Error(), Cwd: entry.Cwd})
+			WriteJSON(w, http.StatusTooManyRequests, runResponse{Error: err.Error(), Cwd: entry.Cwd, SessionID: sessionID})
 			return
 		}
 		execTimeout = t
 		opts = append(opts, shell.WithFS(entry.Fs), shell.WithCwd(entry.Cwd))
 		opts = append(opts, shell.WithNetworkUsage(entry.Network))
 	}
+
 	ctx := native.WithPagerMode(r.Context())
 	var cancel context.CancelFunc
 	ctx, cancel = context.WithTimeout(ctx, execTimeout)
@@ -159,7 +180,7 @@ func (h *Handler) handleRun(w http.ResponseWriter, r *http.Request) {
 	sh, err := shell.New(opts...)
 	if err != nil {
 		log.Printf("memsh serve: shell init error: %v", err)
-		WriteJSON(w, http.StatusInternalServerError, runResponse{Error: "internal server error"})
+		WriteJSON(w, http.StatusInternalServerError, runResponse{Error: "internal server error", SessionID: sessionID})
 		return
 	}
 	defer sh.Close()
@@ -180,14 +201,14 @@ func (h *Handler) handleRun(w http.ResponseWriter, r *http.Request) {
 	cwd := sh.Cwd()
 	respError := ""
 
-	if sessionID != "" {
+	if entry != nil {
 		session.SaveAliases(ctx, sh)
 		h.Store.UpdateWithRuntimeAndNetwork(sessionID, cwd, entry.RcLoaded || rcLoaded, elapsed, sh.NetworkUsage())
 		if err := h.Limits.ValidateFS(entry.Fs); err != nil {
 			respError = err.Error()
 			if preRunSnap != nil {
 				if restoredFS, restoredCwd, restoreErr := shell.RestoreSnapshot(preRunSnap); restoreErr == nil {
-					h.Store.Replace(sessionID, restoredFS, restoredCwd)
+					_ = h.Store.Replace(sessionID, restoredFS, restoredCwd)
 					entry.Fs = restoredFS
 					cwd = restoredCwd
 				} else {
@@ -206,16 +227,18 @@ func (h *Handler) handleRun(w http.ResponseWriter, r *http.Request) {
 		output = output[len(native.PagerSentinel):]
 		pager = true
 	}
-	resp := runResponse{Output: output, Pager: pager, Cwd: cwd}
+	resp := runResponse{Output: output, Pager: pager, Cwd: cwd, SessionID: sessionID}
 	if runErr != nil && !errors.Is(runErr, shell.ErrExit) {
 		if errors.Is(runErr, context.DeadlineExceeded) {
-			if sessionID != "" && h.Limits.MaxRuntime > 0 && entry.Runtime >= h.Limits.MaxRuntime {
+			if entry != nil && h.Limits.MaxRuntime > 0 && entry.Runtime >= h.Limits.MaxRuntime {
 				resp.Error = fmt.Sprintf("session runtime limit exceeded: used %s, max %s", entry.Runtime.Round(time.Millisecond), h.Limits.MaxRuntime)
 			} else {
 				resp.Error = "timeout: execution exceeded " + execTimeout.String()
 			}
 		} else {
-			resp.Error = runErr.Error()
+			// Avoid leaking internal plugin/path details to remote clients.
+			log.Printf("memsh serve: run error session=%s: %v", sessionID, runErr)
+			resp.Error = "command failed"
 		}
 	}
 	if respError != "" {
@@ -242,12 +265,14 @@ func (h *Handler) handleSnapshotGet(w http.ResponseWriter, r *http.Request) {
 	}
 	snap, err := shell.TakeSnapshot(entry.Fs, entry.Cwd)
 	if err != nil {
-		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		log.Printf("memsh serve: snapshot export failed: %v", err)
+		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
 		return
 	}
 	data, err := shell.MarshalSnapshot(snap)
 	if err != nil {
-		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		log.Printf("memsh serve: snapshot marshal failed: %v", err)
+		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -279,13 +304,16 @@ func (h *Handler) handleSnapshotPost(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// "new" means generate a fresh session ID.
-	if id == "new" {
-		b := make([]byte, 8)
+	if id == "new" || id == "" {
+		b := make([]byte, 16)
 		_, _ = rand.Read(b)
 		id = fmt.Sprintf("%x", b)
 	}
 
-	h.Store.Replace(id, fs, cwd)
+	if ok := h.Store.Replace(id, fs, cwd); !ok {
+		WriteJSON(w, http.StatusTooManyRequests, map[string]string{"error": "maximum number of sessions reached"})
+		return
+	}
 	WriteJSON(w, http.StatusOK, map[string]string{"session_id": id})
 }
 
@@ -333,10 +361,11 @@ type completeRequest struct {
 }
 
 type runResponse struct {
-	Output string `json:"output"`
-	Pager  bool   `json:"pager,omitempty"`
-	Cwd    string `json:"cwd"`
-	Error  string `json:"error,omitempty"`
+	Output    string `json:"output"`
+	Pager     bool   `json:"pager,omitempty"`
+	Cwd       string `json:"cwd"`
+	SessionID string `json:"session_id,omitempty"`
+	Error     string `json:"error,omitempty"`
 }
 
 type healthResponse struct {

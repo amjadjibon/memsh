@@ -904,6 +904,11 @@ async function run() {
       body: JSON.stringify({ script }),
     });
     const d = await r.json();
+    if (d.session_id && d.session_id !== currentSession) {
+      currentSession = d.session_id;
+      sessIdInput.value = currentSession;
+      sessionStorage.setItem('memsh-session', currentSession);
+    }
     if (d.pager && d.output) {
       // parse sentinel metadata line: first line is JSON, rest is content
       const nl = d.output.indexOf('\n');

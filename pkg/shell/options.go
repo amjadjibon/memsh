@@ -166,6 +166,15 @@ func WithNetworkUsage(usage network.Usage) Option {
 	}
 }
 
+// WithAllowHostListen permits plugins to open real host listening sockets
+// (for example `nc -l`). Defaults to false so server/MCP sandboxes cannot
+// bind host ports.
+func WithAllowHostListen(allow bool) Option {
+	return func(s *Shell) {
+		s.allowHostListen = allow
+	}
+}
+
 // WithDisabledPlugins removes the named plugins from the shell.
 // Works for both native (builtin) and WASM plugins that are already registered
 // at the time the option is applied (i.e. defaultNativePlugins entries).

@@ -71,6 +71,9 @@ func New(cfg Config) (*http.Server, error) {
 		h = APIKeyMiddleware(h, cfg.APIKey, "/", "/health")
 	}
 
+	// Per-IP rate limit on mutating / expensive endpoints.
+	h = RateLimitMiddleware(h, 120, time.Minute)
+
 	// Security headers (CSP, etc.).
 	h = SecurityHeadersMiddleware(h)
 

@@ -78,6 +78,8 @@ func parseNetworkPolicy(cfg networkFlagConfig) (network.Policy, error) {
 		allowDomains = append(allowDomains, d)
 	}
 
+	// Deny private/reserved ranges by default in CLI and serve to reduce SSRF.
+	// Operators can still allow specific private CIDRs via --net-allow-cidr.
 	policy := network.Policy{
 		Mode:              mode,
 		AllowDomains:      allowDomains,

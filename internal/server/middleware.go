@@ -1,9 +1,14 @@
 package server
 
 import (
+	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/json"
+	"net"
 	"net/http"
+	"strings"
+	"sync"
+	"time"
 )
 
 // WriteJSON writes a JSON response with the given status code.
@@ -14,6 +19,14 @@ func WriteJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(v)
+}
+
+// secureCompare reports whether a and b are equal without leaking length
+// via early-exit timing (hashes both sides first).
+func secureCompare(a, b string) bool {
+	ha := sha256.Sum256([]byte(a))
+	hb := sha256.Sum256([]byte(b))
+	return subtle.ConstantTimeCompare(ha[:], hb[:]) == 1
 }
 
 // APIKeyMiddleware enforces Bearer token authentication on all endpoints
@@ -36,13 +49,13 @@ func APIKeyMiddleware(next http.Handler, key string, excludedPaths ...string) ht
 
 		authHeader := r.Header.Get("Authorization")
 		const prefix = "Bearer "
-		if !hasPrefix(authHeader, prefix) {
+		if !strings.HasPrefix(authHeader, prefix) {
 			http.Error(w, `{"error":"missing or invalid Authorization header"}`, http.StatusUnauthorized)
 			return
 		}
 
 		token := authHeader[len(prefix):]
-		if subtle.ConstantTimeCompare([]byte(token), []byte(key)) != 1 {
+		if !secureCompare(token, key) {
 			http.Error(w, `{"error":"invalid API key"}`, http.StatusForbidden)
 			return
 		}
@@ -83,7 +96,55 @@ func CORSMiddleware(next http.Handler, allowedOrigin string) http.Handler {
 	})
 }
 
-// hasPrefix is a strings.HasPrefix implementation that avoids the import.
-func hasPrefix(s, prefix string) bool {
-	return len(s) >= len(prefix) && s[:len(prefix)] == prefix
+// RateLimitMiddleware applies a simple per-IP token bucket to expensive routes.
+// limit is max requests per window duration.
+func RateLimitMiddleware(next http.Handler, limit int, window time.Duration) http.Handler {
+	if limit <= 0 {
+		limit = 60
+	}
+	if window <= 0 {
+		window = time.Minute
+	}
+	type bucket struct {
+		count int
+		reset time.Time
+	}
+	var mu sync.Mutex
+	buckets := make(map[string]*bucket)
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Skip cheap read-only endpoints.
+		if r.Method == http.MethodGet && (r.URL.Path == "/" || r.URL.Path == "/health") {
+			next.ServeHTTP(w, r)
+			return
+		}
+		ip := clientIP(r)
+		now := time.Now()
+		mu.Lock()
+		b, ok := buckets[ip]
+		if !ok || now.After(b.reset) {
+			b = &bucket{count: 0, reset: now.Add(window)}
+			buckets[ip] = b
+		}
+		b.count++
+		over := b.count > limit
+		mu.Unlock()
+		if over {
+			http.Error(w, `{"error":"rate limit exceeded"}`, http.StatusTooManyRequests)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func clientIP(r *http.Request) string {
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		parts := strings.Split(xff, ",")
+		return strings.TrimSpace(parts[0])
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
 }

@@ -1,6 +1,7 @@
 package git
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -142,7 +143,7 @@ func cmdGitRemote(w io.Writer, errW io.Writer, fs afero.Fs, cwd string, args []s
 // git fetch
 // ---------------------------------------------------------------------------
 
-func cmdGitFetch(w io.Writer, errW io.Writer, fs afero.Fs, cwd string, args []string, getEnv envLookup) error {
+func cmdGitFetch(ctx context.Context, w io.Writer, errW io.Writer, fs afero.Fs, cwd string, args []string, getEnv envLookup, dial dialFunc) error {
 	repo, _, err := openRepo(fs, cwd)
 	if err != nil {
 		return err
@@ -171,11 +172,18 @@ func cmdGitFetch(w io.Writer, errW io.Writer, fs afero.Fs, cwd string, args []st
 	if r, rErr := repo.Remote(remoteName); rErr == nil && len(r.Config().URLs) > 0 {
 		remoteURL = r.Config().URLs[0]
 	}
-	err = repo.Fetch(&gogit.FetchOptions{
-		RemoteName: remoteName,
-		Depth:      depth,
-		Progress:   w,
-		Auth:       authFromEnv(getEnv, remoteURL),
+	if remoteURL != "" {
+		if err := checkRemoteURL(ctx, dial, remoteURL); err != nil {
+			return fmt.Errorf("git fetch: %w", err)
+		}
+	}
+	err = withPolicyHTTPTransport(dial, func() error {
+		return repo.Fetch(&gogit.FetchOptions{
+			RemoteName: remoteName,
+			Depth:      depth,
+			Progress:   w,
+			Auth:       authFromEnv(getEnv, remoteURL),
+		})
 	})
 	if err != nil && !errors.Is(err, gogit.NoErrAlreadyUpToDate) {
 		return fmt.Errorf("git fetch: %w", err)
@@ -191,7 +199,7 @@ func cmdGitFetch(w io.Writer, errW io.Writer, fs afero.Fs, cwd string, args []st
 // git pull
 // ---------------------------------------------------------------------------
 
-func cmdGitPull(w io.Writer, errW io.Writer, fs afero.Fs, cwd string, args []string, getEnv envLookup) error {
+func cmdGitPull(ctx context.Context, w io.Writer, errW io.Writer, fs afero.Fs, cwd string, args []string, getEnv envLookup, dial dialFunc) error {
 	repo, _, err := openRepo(fs, cwd)
 	if err != nil {
 		return err
@@ -225,10 +233,16 @@ func cmdGitPull(w io.Writer, errW io.Writer, fs afero.Fs, cwd string, args []str
 		Progress:      w,
 	}
 	if r, rErr := repo.Remote(remoteName); rErr == nil && len(r.Config().URLs) > 0 {
-		pullOpts.Auth = authFromEnv(getEnv, r.Config().URLs[0])
+		remoteURL := r.Config().URLs[0]
+		pullOpts.Auth = authFromEnv(getEnv, remoteURL)
+		if err := checkRemoteURL(ctx, dial, remoteURL); err != nil {
+			return fmt.Errorf("git pull: %w", err)
+		}
 	}
 
-	err = wt.Pull(pullOpts)
+	err = withPolicyHTTPTransport(dial, func() error {
+		return wt.Pull(pullOpts)
+	})
 	if err != nil && !errors.Is(err, gogit.NoErrAlreadyUpToDate) {
 		return fmt.Errorf("git pull: %w", err)
 	}
@@ -243,7 +257,7 @@ func cmdGitPull(w io.Writer, errW io.Writer, fs afero.Fs, cwd string, args []str
 // git push
 // ---------------------------------------------------------------------------
 
-func cmdGitPush(w io.Writer, errW io.Writer, fs afero.Fs, cwd string, args []string, getEnv envLookup) error {
+func cmdGitPush(ctx context.Context, w io.Writer, errW io.Writer, fs afero.Fs, cwd string, args []string, getEnv envLookup, dial dialFunc) error {
 	repo, _, err := openRepo(fs, cwd)
 	if err != nil {
 		return err
@@ -282,7 +296,11 @@ func cmdGitPush(w io.Writer, errW io.Writer, fs afero.Fs, cwd string, args []str
 		Progress:   w,
 	}
 	if r, rErr := repo.Remote(remoteName); rErr == nil && len(r.Config().URLs) > 0 {
-		pushOpts.Auth = authFromEnv(getEnv, r.Config().URLs[0])
+		remoteURL := r.Config().URLs[0]
+		pushOpts.Auth = authFromEnv(getEnv, remoteURL)
+		if err := checkRemoteURL(ctx, dial, remoteURL); err != nil {
+			return fmt.Errorf("git push: %w", err)
+		}
 	}
 	if tags {
 		pushOpts.RefSpecs = append(pushOpts.RefSpecs, config.RefSpec("refs/tags/*:refs/tags/*"))
@@ -291,7 +309,9 @@ func cmdGitPush(w io.Writer, errW io.Writer, fs afero.Fs, cwd string, args []str
 		pushOpts.RefSpecs = append(pushOpts.RefSpecs, refSpecs...)
 	}
 
-	err = repo.Push(pushOpts)
+	err = withPolicyHTTPTransport(dial, func() error {
+		return repo.Push(pushOpts)
+	})
 	if err != nil && !errors.Is(err, gogit.NoErrAlreadyUpToDate) {
 		return fmt.Errorf("git push: %w", err)
 	}
@@ -306,7 +326,7 @@ func cmdGitPush(w io.Writer, errW io.Writer, fs afero.Fs, cwd string, args []str
 // git ls-remote
 // ---------------------------------------------------------------------------
 
-func cmdGitLsRemote(w io.Writer, errW io.Writer, fs afero.Fs, cwd string, args []string, getEnv envLookup) error {
+func cmdGitLsRemote(ctx context.Context, w io.Writer, errW io.Writer, fs afero.Fs, cwd string, args []string, getEnv envLookup, dial dialFunc) error {
 	var urlOrName string
 	headsOnly := false
 	tagsOnly := false
@@ -339,13 +359,22 @@ func cmdGitLsRemote(w io.Writer, errW io.Writer, fs afero.Fs, cwd string, args [
 		}
 	}
 
+	if err := checkRemoteURL(ctx, dial, resolvedURL); err != nil {
+		return fmt.Errorf("git ls-remote: %w", err)
+	}
+
 	remote := gogit.NewRemote(memory.NewStorage(), &config.RemoteConfig{
 		Name: "origin",
 		URLs: []string{resolvedURL},
 	})
 
-	refs, err := remote.List(&gogit.ListOptions{
-		Auth: authFromEnv(getEnv, resolvedURL),
+	var refs []*plumbing.Reference
+	err := withPolicyHTTPTransport(dial, func() error {
+		var listErr error
+		refs, listErr = remote.List(&gogit.ListOptions{
+			Auth: authFromEnv(getEnv, resolvedURL),
+		})
+		return listErr
 	})
 	if err != nil {
 		return fmt.Errorf("git ls-remote: %w", err)

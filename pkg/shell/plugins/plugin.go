@@ -81,6 +81,9 @@ type ShellContext struct {
 	SourceFile func(ctx context.Context, path string) error
 	// NetworkDialContext provides policy-enforced outbound dialing for plugins.
 	NetworkDialContext func(ctx context.Context, network, address string) (net.Conn, error)
+	// AllowHostListen permits plugins to bind real host ports (e.g. nc -l).
+	// Default false — required for sandbox isolation in server mode.
+	AllowHostListen bool
 }
 
 type ctxKey struct{}

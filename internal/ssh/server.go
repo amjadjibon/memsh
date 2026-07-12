@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/pem"
 	"errors"
@@ -50,6 +51,9 @@ func New(cfg Config) (*Server, error) {
 	if cfg.Store == nil {
 		return nil, fmt.Errorf("session store is required")
 	}
+	if strings.TrimSpace(cfg.APIKey) == "" {
+		return nil, fmt.Errorf("SSH requires a non-empty API key (--api-key); refusing to start unauthenticated SSH")
+	}
 	if cfg.MinTimeout <= 0 {
 		cfg.MinTimeout = defaultMinTimeout
 	}
@@ -62,22 +66,27 @@ func New(cfg Config) (*Server, error) {
 		return nil, fmt.Errorf("SSH host key: %w", err)
 	}
 
+	apiKey := cfg.APIKey
 	srv := &gliderssh.Server{
 		Addr:        cfg.Addr,
 		HostSigners: []gliderssh.Signer{signer},
 		Handler: func(s gliderssh.Session) {
 			handleSession(s, cfg.Store, cfg.BaseOpts, cfg.Timeout, cfg.MinTimeout, cfg.Limits)
 		},
-	}
-
-	if cfg.APIKey != "" {
-		// Require password == API key.
-		srv.PasswordHandler = func(_ gliderssh.Context, password string) bool {
-			return subtle.ConstantTimeCompare([]byte(password), []byte(cfg.APIKey)) == 1
-		}
+		// Always require password == API key (hashed constant-time compare).
+		PasswordHandler: func(_ gliderssh.Context, password string) bool {
+			return secureAPIKeyEqual(password, apiKey)
+		},
 	}
 
 	return &Server{Server: srv}, nil
+}
+
+func secureAPIKeyEqual(a, b string) bool {
+	// Hash first so length differences do not short-circuit ConstantTimeCompare.
+	ha := sha256.Sum256([]byte(a))
+	hb := sha256.Sum256([]byte(b))
+	return subtle.ConstantTimeCompare(ha[:], hb[:]) == 1
 }
 
 // handleSession runs a memsh shell for an incoming SSH connection.
@@ -100,6 +109,9 @@ func handleSession(s gliderssh.Session, store *session.Store, baseOpts []shell.O
 
 	// non-interactive: single command
 	if len(cmdArgs) > 0 {
+		entry.ExecMu.Lock()
+		defer entry.ExecMu.Unlock()
+
 		if err := limits.ValidateRuntime(entry.Runtime); err != nil {
 			fmt.Fprintf(s.Stderr(), "error: %v\n", err)
 			_ = s.Exit(1)
@@ -122,7 +134,7 @@ func handleSession(s gliderssh.Session, store *session.Store, baseOpts []shell.O
 		if limits.HasFSLimits() {
 			snap, snapErr := shell.TakeSnapshot(entry.Fs, entry.Cwd)
 			if snapErr != nil {
-				fmt.Fprintf(s.Stderr(), "error: failed to snapshot session state: %v\n", snapErr)
+				fmt.Fprintf(s.Stderr(), "error: failed to snapshot session state\n")
 				_ = s.Exit(1)
 				return
 			}
@@ -140,7 +152,7 @@ func handleSession(s gliderssh.Session, store *session.Store, baseOpts []shell.O
 
 		sh, err := shell.New(opts...)
 		if err != nil {
-			fmt.Fprintf(s.Stderr(), "error: %v\n", err)
+			fmt.Fprintf(s.Stderr(), "error: shell init failed\n")
 			_ = s.Exit(1)
 			return
 		}
@@ -164,7 +176,7 @@ func handleSession(s gliderssh.Session, store *session.Store, baseOpts []shell.O
 		if fsErr := limits.ValidateFS(entry.Fs); fsErr != nil {
 			if preRunSnap != nil {
 				if restoredFS, restoredCwd, restoreErr := shell.RestoreSnapshot(preRunSnap); restoreErr == nil {
-					store.Replace(sessionID, restoredFS, restoredCwd)
+					_ = store.Replace(sessionID, restoredFS, restoredCwd)
 				}
 			}
 			fmt.Fprintf(s.Stderr(), "error: %v\n", fsErr)
@@ -218,16 +230,21 @@ func handleSession(s gliderssh.Session, store *session.Store, baseOpts []shell.O
 			fmt.Fprint(s, "logout\r\n")
 			break
 		}
+
+		entry.ExecMu.Lock()
 		if err := limits.ValidateRuntime(entry.Runtime); err != nil {
+			entry.ExecMu.Unlock()
 			fmt.Fprintf(s, "error: %v\r\n", err)
 			continue
 		}
 		if err := limits.ValidateFS(entry.Fs); err != nil {
+			entry.ExecMu.Unlock()
 			fmt.Fprintf(s, "error: %v\r\n", err)
 			continue
 		}
 		execTimeout, err := limits.EffectiveTimeout(timeout, entry.Runtime, minTimeout)
 		if err != nil {
+			entry.ExecMu.Unlock()
 			fmt.Fprintf(s, "error: %v\r\n", err)
 			continue
 		}
@@ -235,7 +252,8 @@ func handleSession(s gliderssh.Session, store *session.Store, baseOpts []shell.O
 		if limits.HasFSLimits() {
 			snap, snapErr := shell.TakeSnapshot(entry.Fs, cwd)
 			if snapErr != nil {
-				fmt.Fprintf(s, "error: failed to snapshot session state: %v\r\n", snapErr)
+				entry.ExecMu.Unlock()
+				fmt.Fprintf(s, "error: failed to snapshot session state\r\n")
 				continue
 			}
 			preRunSnap = snap
@@ -253,7 +271,8 @@ func handleSession(s gliderssh.Session, store *session.Store, baseOpts []shell.O
 
 		sh, shErr := shell.New(opts...)
 		if shErr != nil {
-			fmt.Fprintf(s, "error: %v\r\n", shErr)
+			entry.ExecMu.Unlock()
+			fmt.Fprintf(s, "error: shell init failed\r\n")
 			continue
 		}
 
@@ -271,7 +290,7 @@ func handleSession(s gliderssh.Session, store *session.Store, baseOpts []shell.O
 		if fsErr := limits.ValidateFS(entry.Fs); fsErr != nil {
 			if preRunSnap != nil {
 				if restoredFS, restoredCwd, restoreErr := shell.RestoreSnapshot(preRunSnap); restoreErr == nil {
-					store.Replace(sessionID, restoredFS, restoredCwd)
+					_ = store.Replace(sessionID, restoredFS, restoredCwd)
 					newCwd = restoredCwd
 				}
 			}
@@ -281,6 +300,7 @@ func handleSession(s gliderssh.Session, store *session.Store, baseOpts []shell.O
 			fmt.Fprintf(s, "error: %v\r\n", rtErr)
 		}
 		cwd = newCwd
+		entry.ExecMu.Unlock()
 
 		// Translate bare LF -> CR+LF for the remote terminal.
 		output := strings.ReplaceAll(cmdOut.String(), "\r\n", "\n")
@@ -288,7 +308,7 @@ func handleSession(s gliderssh.Session, store *session.Store, baseOpts []shell.O
 		fmt.Fprint(s, output)
 
 		if runErr != nil && !errors.Is(runErr, shell.ErrExit) {
-			fmt.Fprintf(s, "%v\r\n", runErr)
+			fmt.Fprintf(s, "command failed\r\n")
 		}
 	}
 	_ = s.Exit(0)

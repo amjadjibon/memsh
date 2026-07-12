@@ -65,9 +65,11 @@ func (GitPlugin) Run(ctx context.Context, args []string) error {
 	sub := remaining[0]
 	rest := remaining[1:]
 
+	dial := sc.NetworkDialContext
+
 	switch sub {
 	case "clone":
-		return cmdGitClone(hc.Stdout, hc.Stderr, fs, cwd, rest, sc.Env)
+		return cmdGitClone(ctx, hc.Stdout, hc.Stderr, fs, cwd, rest, sc.Env, dial)
 	case "init":
 		return cmdGitInit(hc.Stdout, fs, cwd, rest)
 	case "add":
@@ -95,11 +97,11 @@ func (GitPlugin) Run(ctx context.Context, args []string) error {
 	case "merge":
 		return cmdGitMerge(hc.Stdout, hc.Stderr, fs, cwd, rest)
 	case "fetch":
-		return cmdGitFetch(hc.Stdout, hc.Stderr, fs, cwd, rest, sc.Env)
+		return cmdGitFetch(ctx, hc.Stdout, hc.Stderr, fs, cwd, rest, sc.Env, dial)
 	case "pull":
-		return cmdGitPull(hc.Stdout, hc.Stderr, fs, cwd, rest, sc.Env)
+		return cmdGitPull(ctx, hc.Stdout, hc.Stderr, fs, cwd, rest, sc.Env, dial)
 	case "push":
-		return cmdGitPush(hc.Stdout, hc.Stderr, fs, cwd, rest, sc.Env)
+		return cmdGitPush(ctx, hc.Stdout, hc.Stderr, fs, cwd, rest, sc.Env, dial)
 	case "remote":
 		return cmdGitRemote(hc.Stdout, hc.Stderr, fs, cwd, rest)
 	case "tag":
@@ -131,7 +133,7 @@ func (GitPlugin) Run(ctx context.Context, args []string) error {
 	case "hash-object":
 		return cmdGitHashObject(hc.Stdout, hc.Stderr, fs, cwd, rest)
 	case "ls-remote":
-		return cmdGitLsRemote(hc.Stdout, hc.Stderr, fs, cwd, rest, sc.Env)
+		return cmdGitLsRemote(ctx, hc.Stdout, hc.Stderr, fs, cwd, rest, sc.Env, dial)
 	case "config":
 		return cmdGitConfig(hc.Stdout, hc.Stderr, fs, cwd, rest)
 	default:

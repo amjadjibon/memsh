@@ -57,11 +57,25 @@ func TestNc(t *testing.T) {
 		}
 	})
 
-	t.Run("listen mode accepts one connection", func(t *testing.T) {
+	t.Run("listen mode disabled by default", func(t *testing.T) {
+		var buf strings.Builder
+		s := NewTestShell(t, &buf, shell.WithFS(afero.NewMemMapFs()))
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		err := s.Run(ctx, "nc -l -w 1 127.0.0.1 19999")
+		if err == nil {
+			t.Fatal("expected listen mode to be rejected")
+		}
+		if !strings.Contains(buf.String(), "listen mode disabled") {
+			t.Errorf("expected disabled message, got %q", buf.String())
+		}
+	})
+
+	t.Run("listen mode accepts one connection when allowed", func(t *testing.T) {
 		port := freePort(t)
 
 		var buf strings.Builder
-		s := NewTestShell(t, &buf, shell.WithFS(afero.NewMemMapFs()))
+		s := NewTestShell(t, &buf, shell.WithFS(afero.NewMemMapFs()), shell.WithAllowHostListen(true))
 
 		// Run nc -l in background; connect a client after a short delay.
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
