@@ -28,3 +28,6 @@ dist/
 # Environment
 .env
 .env.local
+
+# Dev loop worktrees
+.worktrees/
