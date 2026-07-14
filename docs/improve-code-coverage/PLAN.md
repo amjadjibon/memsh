@@ -4,13 +4,13 @@ version: 1.0
 date_created: 2026-07-15
 last_updated: 2026-07-15
 owner: maintainers
-status: 'Planned'
+status: 'Completed'
 tags: [chore]
 ---
 
 # Improve Code Coverage
 
-![Status: Planned](https://img.shields.io/badge/status-Planned-blue)
+![Status: Completed](https://img.shields.io/badge/status-Completed-brightgreen)
 
 Add focused tests around small, stable packages that currently report 0% coverage. This raises meaningful coverage without changing runtime behavior or introducing flaky integration dependencies.
 
@@ -29,10 +29,10 @@ Add focused tests around small, stable packages that currently report 0% coverag
 
 **Goal**: Cover deterministic helper packages and shell plugin context helpers with targeted unit tests.
 
-- [ ] TASK-001: Add `internal/paths/paths_test.go` covering path resolution and directory creation with `t.Setenv("HOME", tmp)`.
-- [ ] TASK-002: Add `internal/config/config_test.go` covering defaults, valid TOML, invalid TOML, disabled WASM, plugin allowlist, and disabled plugins.
-- [ ] TASK-003: Add `pkg/cron/cron_test.go` covering `ParseCronExpr`, Sunday `7` normalization, `CronMatches`, `ParseCrontab`, comments, and parse errors.
-- [ ] TASK-004: Add `pkg/shell/plugins/plugin_test.go` covering missing and injected shell context behavior.
+- [x] TASK-001: Add `internal/paths/paths_test.go` covering path resolution and directory creation with `t.Setenv("HOME", tmp)`.
+- [x] TASK-002: Add `internal/config/config_test.go` covering defaults, valid TOML, invalid TOML, disabled WASM, plugin allowlist, and disabled plugins.
+- [x] TASK-003: Add `pkg/cron/cron_test.go` covering `ParseCronExpr`, Sunday `7` normalization, `CronMatches`, `ParseCrontab`, comments, and parse errors.
+- [x] TASK-004: Add `pkg/shell/plugins/plugin_test.go` covering missing and injected shell context behavior.
 
 **Completion criteria**: `go test ./internal/paths ./internal/config ./pkg/cron ./pkg/shell/plugins ./... -coverprofile=coverage.out` passes and overall coverage is higher than the 5.9% baseline.
 
@@ -66,8 +66,8 @@ Do NOT push, open PRs, or modify PLAN.md.
 
 ## 3. Testing
 
-- [ ] TEST-001: Run `go test ./internal/paths ./internal/config ./pkg/cron ./pkg/shell/plugins`.
-- [ ] TEST-002: Run `go test ./... -coverprofile=coverage.out` and compare to the 5.9% baseline.
+- [x] TEST-001: Run `go test ./internal/paths ./internal/config ./pkg/cron ./pkg/shell/plugins`.
+- [x] TEST-002: Run `go test ./... -coverprofile=coverage.out` and compare to the 5.9% baseline.
 
 ## 4. Risks & Assumptions
 
