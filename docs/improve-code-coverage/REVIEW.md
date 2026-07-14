@@ -13,7 +13,7 @@ verdict: Approve
 
 ## Summary
 
-Reviewed the branch diff against `main`, including loop docs, QA evidence, and four new Go test files. The tests isolate filesystem state with `t.TempDir()`/`t.Setenv()`, cover expected and error paths, and avoid external services. No correctness, security, or test-quality findings were identified.
+Reviewed the branch diff against `main`, including loop docs, QA evidence, and five new Go test files. The tests isolate filesystem state with `t.TempDir()`/`t.Setenv()`, cover expected and error paths, and avoid external services. No correctness, security, or test-quality findings were identified.
 
 ## Findings
 
@@ -24,6 +24,7 @@ No findings.
 - New config and paths tests isolate `HOME`, preventing pollution of the developer environment.
 - Cron tests cover descriptors, Sunday `7` normalization, positive matches, negative matches, and parse errors.
 - Plugin context tests verify both missing and injected context behavior.
+- Native helper tests cover shared parsing, formatting, escape expansion, and mktemp generation without invoking external commands.
 
 ## Pre-Merge Checklist
 
