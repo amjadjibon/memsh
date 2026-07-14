@@ -8,7 +8,7 @@ max_phases: 5
 max_agents: 3
 current_iteration: 1
 status: running
-last_review_base: ''
+last_review_base: 'ede5791'
 ---
 
 # Dev Loop: improve-code-coverage
@@ -36,6 +36,6 @@ last_review_base: ''
 
 ### Iteration 1
 - [x] dev-implement-plan
-- [ ] dev-qa
+- [x] dev-qa
 - [ ] dev-code-review
 - [ ] decide
