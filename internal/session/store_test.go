@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/amjadjibon/memsh/internal/session"
+	"github.com/spf13/afero"
 )
 
 func TestStoreReapShutdown(t *testing.T) {
@@ -297,5 +298,100 @@ func TestStoreGetExisting(t *testing.T) {
 	st.Get("aaaaaaaaaaaaaaaa")
 	if _, ok := st.GetExisting("aaaaaaaaaaaaaaaa"); !ok {
 		t.Fatal("expected existing")
+	}
+}
+
+func TestNewPersistentRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	st, err := session.NewPersistent(ctx, time.Hour, 0, dir)
+	if err != nil {
+		t.Fatalf("NewPersistent: %v", err)
+	}
+	entry, ok := st.Get("aaaaaaaaaaaaaaaa")
+	if !ok {
+		t.Fatal("Get failed")
+	}
+	if err := afero.WriteFile(entry.Fs, "/marker.txt", []byte("survives restart"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Update persists the current FS/cwd snapshot to disk.
+	st.Update("aaaaaaaaaaaaaaaa", "/home", true)
+
+	// Simulate a server restart: create a brand new store pointed at the
+	// same persistDir and confirm the session comes back.
+	ctx2, cancel2 := context.WithCancel(context.Background())
+	defer cancel2()
+	st2, err := session.NewPersistent(ctx2, time.Hour, 0, dir)
+	if err != nil {
+		t.Fatalf("NewPersistent (reload): %v", err)
+	}
+	restored, ok := st2.GetExisting("aaaaaaaaaaaaaaaa")
+	if !ok {
+		t.Fatal("expected restored session to exist after reload")
+	}
+	if restored.Cwd != "/home" {
+		t.Errorf("Cwd = %q, want /home", restored.Cwd)
+	}
+	if !restored.RcLoaded {
+		t.Error("RcLoaded should be true after reload")
+	}
+	data, err := afero.ReadFile(restored.Fs, "/marker.txt")
+	if err != nil {
+		t.Fatalf("reading restored file: %v", err)
+	}
+	if string(data) != "survives restart" {
+		t.Errorf("restored file content = %q", data)
+	}
+}
+
+func TestNewPersistentExpiredSessionDropped(t *testing.T) {
+	dir := t.TempDir()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	st, err := session.NewPersistent(ctx, 10*time.Millisecond, 0, dir)
+	if err != nil {
+		t.Fatalf("NewPersistent: %v", err)
+	}
+	st.Get("aaaaaaaaaaaaaaaa")
+	st.Update("aaaaaaaaaaaaaaaa", "/", false)
+
+	time.Sleep(20 * time.Millisecond)
+
+	ctx2, cancel2 := context.WithCancel(context.Background())
+	defer cancel2()
+	st2, err := session.NewPersistent(ctx2, 10*time.Millisecond, 0, dir)
+	if err != nil {
+		t.Fatalf("NewPersistent (reload): %v", err)
+	}
+	if _, ok := st2.GetExisting("aaaaaaaaaaaaaaaa"); ok {
+		t.Error("expired session should not be restored")
+	}
+}
+
+func TestNewPersistentDeleteRemovesFile(t *testing.T) {
+	dir := t.TempDir()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	st, err := session.NewPersistent(ctx, time.Hour, 0, dir)
+	if err != nil {
+		t.Fatalf("NewPersistent: %v", err)
+	}
+	st.Get("aaaaaaaaaaaaaaaa")
+	st.Update("aaaaaaaaaaaaaaaa", "/", false)
+	st.Delete("aaaaaaaaaaaaaaaa")
+
+	ctx2, cancel2 := context.WithCancel(context.Background())
+	defer cancel2()
+	st2, err := session.NewPersistent(ctx2, time.Hour, 0, dir)
+	if err != nil {
+		t.Fatalf("NewPersistent (reload): %v", err)
+	}
+	if _, ok := st2.GetExisting("aaaaaaaaaaaaaaaa"); ok {
+		t.Error("deleted session should not reappear after reload")
 	}
 }
