@@ -34,7 +34,6 @@ func (UUIDPlugin) Run(ctx context.Context, args []string) error {
 	for i < len(args) {
 		switch args[i] {
 		case "--":
-			i++
 			goto doneFlags
 		case "-n", "--count":
 			if i+1 >= len(args) {

@@ -1,15 +1,25 @@
 package server
 
 import (
+	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
-	"crypto/subtle"
 	"encoding/json"
 	"net"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"time"
 )
+
+// hmacKey is a random per-process key used to compare secrets via keyed
+// hashing instead of a bare hash, which is brute-forceable/precomputable.
+var hmacKey = func() []byte {
+	k := make([]byte, 32)
+	_, _ = rand.Read(k)
+	return k
+}()
 
 // WriteJSON writes a JSON response with the given status code.
 // The response body is encoded using json.NewEncoder with Content-Type
@@ -22,11 +32,18 @@ func WriteJSON(w http.ResponseWriter, status int, v any) {
 }
 
 // secureCompare reports whether a and b are equal without leaking length
-// via early-exit timing (hashes both sides first).
+// via early-exit timing (keyed-hashes both sides first, then compares in
+// constant time via hmac.Equal).
 func secureCompare(a, b string) bool {
-	ha := sha256.Sum256([]byte(a))
-	hb := sha256.Sum256([]byte(b))
-	return subtle.ConstantTimeCompare(ha[:], hb[:]) == 1
+	mac := hmac.New(sha256.New, hmacKey)
+	mac.Write([]byte(a))
+	ha := mac.Sum(nil)
+
+	mac = hmac.New(sha256.New, hmacKey)
+	mac.Write([]byte(b))
+	hb := mac.Sum(nil)
+
+	return hmac.Equal(ha, hb)
 }
 
 // APIKeyMiddleware enforces Bearer token authentication on all endpoints
@@ -40,11 +57,9 @@ func secureCompare(a, b string) bool {
 func APIKeyMiddleware(next http.Handler, key string, excludedPaths ...string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Allow unauthenticated access to excluded paths.
-		for _, path := range excludedPaths {
-			if r.URL.Path == path {
-				next.ServeHTTP(w, r)
-				return
-			}
+		if slices.Contains(excludedPaths, r.URL.Path) {
+			next.ServeHTTP(w, r)
+			return
 		}
 
 		authHeader := r.Header.Get("Authorization")

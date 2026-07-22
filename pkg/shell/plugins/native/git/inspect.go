@@ -206,7 +206,11 @@ func cmdGitLsTree(w io.Writer, errW io.Writer, fs afero.Fs, cwd string, args []s
 		entry, err := tree.FindEntry(pathFilter)
 		if err == nil && entry.Mode.IsFile() {
 			if longFormat {
-				fmt.Fprintf(w, "%06o blob %s\t%s\n", entry.Mode, entry.Hash.String(), entry.Name)
+				size := int64(0)
+				if blob, berr := repo.BlobObject(entry.Hash); berr == nil {
+					size = blob.Size
+				}
+				fmt.Fprintf(w, "%06o blob %s %7d\t%s\n", entry.Mode, entry.Hash.String(), size, entry.Name)
 			} else {
 				fmt.Fprintf(w, "%06o blob %s\t%s\n", entry.Mode, entry.Hash.String(), entry.Name)
 			}

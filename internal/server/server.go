@@ -247,7 +247,7 @@ func (h *Handler) handleRun(w http.ResponseWriter, r *http.Request) {
 			}
 		} else {
 			// Avoid leaking internal plugin/path details to remote clients.
-			log.Printf("memsh serve: run error session=%s: %v", sessionID, runErr)
+			log.Printf("memsh serve: run error session=%q: %v", sessionID, runErr)
 			resp.Error = "command failed"
 		}
 	}

@@ -356,7 +356,7 @@ func (st *Store) persistLocked(id string, e *Entry) {
 	}
 	snap, err := shell.TakeSnapshot(e.Fs, e.Cwd)
 	if err != nil {
-		log.Printf("session persistence snapshot %s: %v", id, err)
+		log.Printf("session persistence snapshot %q: %v", id, err)
 		return
 	}
 	if err := writePersistedSession(st.persistDir, persistedSession{
@@ -369,7 +369,7 @@ func (st *Store) persistLocked(id string, e *Entry) {
 		Network:   e.Network,
 		Snapshot:  snap,
 	}); err != nil {
-		log.Printf("session persistence write %s: %v", id, err)
+		log.Printf("session persistence write %q: %v", id, err)
 	}
 }
 
