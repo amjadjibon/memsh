@@ -259,4 +259,40 @@ func TestGit(t *testing.T) {
 			t.Errorf("git config user.name: expected 'Alice', got: %q", out)
 		}
 	})
+
+	t.Run("git ls-tree -l on a single file path includes size", func(t *testing.T) {
+		var buf strings.Builder
+		fs := afero.NewMemMapFs()
+		if err := fs.MkdirAll("/repo", 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := afero.WriteFile(fs, "/repo/hello.txt", []byte("hello world\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		s := gitShell(t, &buf, fs)
+		run(t, s, ctx, `git init /repo`)
+		run(t, s, ctx, `git -C /repo add hello.txt`)
+		run(t, s, ctx, `git -C /repo commit -m "first commit"`)
+
+		buf.Reset()
+		if err := s.Run(ctx, `git -C /repo ls-tree -l HEAD hello.txt`); err != nil {
+			t.Fatalf("git ls-tree -l: %v", err)
+		}
+		out := strings.TrimSpace(buf.String())
+		longFields := strings.Fields(strings.SplitN(out, "\t", 2)[0])
+		if len(longFields) != 4 || longFields[3] != "12" { // "hello world\n" is 12 bytes
+			t.Errorf("git ls-tree -l: expected 4 fields ending in size 12, got: %q", out)
+		}
+
+		buf.Reset()
+		if err := s.Run(ctx, `git -C /repo ls-tree HEAD hello.txt`); err != nil {
+			t.Fatalf("git ls-tree: %v", err)
+		}
+		shortOut := strings.TrimSpace(buf.String())
+		shortFields := strings.Fields(strings.SplitN(shortOut, "\t", 2)[0])
+		if len(shortFields) != 3 {
+			t.Errorf("git ls-tree (no -l): expected 3 fields (no size), got: %q", shortOut)
+		}
+	})
 }

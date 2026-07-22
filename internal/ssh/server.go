@@ -4,9 +4,9 @@ package ssh
 import (
 	"context"
 	"crypto/ed25519"
+	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
-	"crypto/subtle"
 	"encoding/pem"
 	"errors"
 	"fmt"
@@ -23,6 +23,14 @@ import (
 	"github.com/amjadjibon/memsh/internal/session"
 	"github.com/amjadjibon/memsh/pkg/shell"
 )
+
+// apiKeyHMACKey is a random per-process key used to compare the SSH API key
+// via keyed hashing instead of a bare hash, which is brute-forceable/precomputable.
+var apiKeyHMACKey = func() []byte {
+	k := make([]byte, 32)
+	_, _ = rand.Read(k)
+	return k
+}()
 
 const defaultMinTimeout = 5 * time.Second
 
@@ -83,10 +91,17 @@ func New(cfg Config) (*Server, error) {
 }
 
 func secureAPIKeyEqual(a, b string) bool {
-	// Hash first so length differences do not short-circuit ConstantTimeCompare.
-	ha := sha256.Sum256([]byte(a))
-	hb := sha256.Sum256([]byte(b))
-	return subtle.ConstantTimeCompare(ha[:], hb[:]) == 1
+	// Keyed-hash first so length differences do not leak via early-exit
+	// comparison, then compare in constant time via hmac.Equal.
+	mac := hmac.New(sha256.New, apiKeyHMACKey)
+	mac.Write([]byte(a))
+	ha := mac.Sum(nil)
+
+	mac = hmac.New(sha256.New, apiKeyHMACKey)
+	mac.Write([]byte(b))
+	hb := mac.Sum(nil)
+
+	return hmac.Equal(ha, hb)
 }
 
 // handleSession runs a memsh shell for an incoming SSH connection.
