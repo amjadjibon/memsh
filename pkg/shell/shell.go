@@ -479,7 +479,7 @@ func (s *Shell) statHandler(_ context.Context, name string, _ bool) (fs.FileInfo
 	return s.fs.Stat(absPath)
 }
 
-func (s *Shell) accessHandler(_ context.Context, path string, mode uint32) error {
+func (s *Shell) accessHandler(_ context.Context, path string, mode interp.AccessMode) error {
 	absPath := path
 	if !filepath.IsAbs(path) {
 		absPath = filepath.Join(s.cwd, path)
@@ -491,19 +491,14 @@ func (s *Shell) accessHandler(_ context.Context, path string, mode uint32) error
 	}
 
 	m := info.Mode()
-	switch mode {
-	case 0x1: // X_OK
-		if m&0o111 == 0 {
-			return &os.PathError{Op: "access", Path: path, Err: fmt.Errorf("file is not executable")}
-		}
-	case 0x2: // W_OK
-		if m&0o222 == 0 {
-			return &os.PathError{Op: "access", Path: path, Err: fmt.Errorf("file is not writable")}
-		}
-	case 0x4: // R_OK
-		if m&0o444 == 0 {
-			return &os.PathError{Op: "access", Path: path, Err: fmt.Errorf("file is not readable")}
-		}
+	if mode&interp.AccessExec != 0 && m&0o111 == 0 {
+		return &os.PathError{Op: "access", Path: path, Err: fmt.Errorf("file is not executable")}
+	}
+	if mode&interp.AccessWrite != 0 && m&0o222 == 0 {
+		return &os.PathError{Op: "access", Path: path, Err: fmt.Errorf("file is not writable")}
+	}
+	if mode&interp.AccessRead != 0 && m&0o444 == 0 {
+		return &os.PathError{Op: "access", Path: path, Err: fmt.Errorf("file is not readable")}
 	}
 	return nil
 }
