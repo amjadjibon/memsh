@@ -109,6 +109,11 @@ func startTestSSHServer(t *testing.T, fs afero.Fs, apiKey string) (string, gossh
 					fmt.Fprintf(s, "error: %v\n", runErr)
 				}
 			}
+			if scanErr := scanner.Err(); scanErr != nil {
+				fmt.Fprintf(s, "error: %v\n", scanErr)
+				_ = s.Exit(1)
+				return
+			}
 			_ = s.Exit(0)
 		},
 	}
