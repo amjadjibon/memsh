@@ -32,6 +32,7 @@ var (
 	localSessionID  string
 	localStoreDir   string
 	localNetFlags   networkFlagConfig
+	unsafeInterps   bool
 )
 
 var rootCmd = &cobra.Command{
@@ -58,6 +59,9 @@ var rootCmd = &cobra.Command{
 		}
 		if len(cfg.Plugins.WASM) > 0 {
 			opts = append(opts, shell.WithPluginFilter(cfg.Plugins.WASM))
+		}
+		if cfg.Shell.UnsafeInterpreters || unsafeInterps {
+			opts = append(opts, shell.WithUnsafeInterpreters(true))
 		}
 		if len(cfg.Plugins.Disable) > 0 {
 			opts = append(opts, shell.WithDisabledPlugins(cfg.Plugins.Disable...))
@@ -451,6 +455,9 @@ func init() {
 	rootCmd.Flags().StringVar(&localStoreDir, "session-store", "", "Directory for local session persistence (requires --session-id)")
 	rootCmd.Flags().StringVar(&localSessionID, "session-id", "", "Local persisted session id to load/save (requires --session-store)")
 	addNetworkFlags(rootCmd.Flags(), &localNetFlags)
+	rootCmd.PersistentFlags().BoolVar(&unsafeInterps, "unsafe-interpreters", false,
+		"Enable lua, go and sqlite3. They embed interpreters that can run real OS commands "+
+			"and touch the real filesystem; only enable for trusted scripts")
 	rootCmd.Flags().BoolP("version", "v", false, "Print the version")
 }
 

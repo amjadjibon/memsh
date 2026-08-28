@@ -4,9 +4,25 @@ This file provides guidance to AGENTS when working with code in this repository.
 
 ## Project Overview
 
-`memsh` is a **virtual bash shell** implemented in Go. It executes bash-like commands against an `afero.MemMapFs` in-memory filesystem — the real OS filesystem is never touched. Shell parsing/interpretation is delegated to `mvdan.cc/sh/v3`; all commands (built-ins and extensions) are native Go plugins or WASM plugins.
+`memsh` is a **virtual bash shell** implemented in Go. It executes bash-like commands against an `afero.MemMapFs` in-memory filesystem — with the default command set the real OS filesystem is not touched. Shell parsing/interpretation is delegated to `mvdan.cc/sh/v3`; all commands (built-ins and extensions) are native Go plugins or WASM plugins.
 
-**Security model:** external OS commands are blocked by default. Only registered plugins can run. Opt-in via `WithAllowExternalCommands(true)`.
+**Security model:** external OS commands are blocked by default — only registered plugins can run. Opt-in via `WithAllowExternalCommands(true)`.
+
+This is a *soft* boundary, not a sandbox. It holds for native plugins written
+against the virtual FS and for WASM plugins (wazero grants a module no ambient
+authority: WASI preview1 has no exec, no socket-open, and the only mount is the
+afero FS). It does **not** hold for plugins that embed a third-party
+interpreter, because those arrive pre-wired to the host OS. Three are therefore
+withheld unless `WithUnsafeInterpreters(true)` / `--unsafe-interpreters` is set:
+
+| Command | Host access it carries |
+| --- | --- |
+| `lua` | gopher-lua opens the full Lua stdlib: `os.execute` runs real commands, `io.open` reads/writes real files |
+| `go` | mvm binds the whole Go stdlib including `os/exec` and `syscall` |
+| `sqlite3` | operates on a real OS temp file, so `ATTACH DATABASE` / `VACUUM INTO` reach arbitrary real paths |
+
+`memsh serve` refuses `--unsafe-interpreters` without `--api-key`. For untrusted
+input, leave them off and prefer the WASM plugin path.
 
 ## Repository Guidelines (Contributor Quick Guide)
 
@@ -80,6 +96,7 @@ Shell.Run(ctx, script)
         ↓ interp.ExecHandlers
               WithShellContext()         # injects FS+cwd+aliases into ctx
               s.builtins[cmd]            # native Go plugins (each in pkg/shell/plugins/native/<cmd>.go)
+              #                          # lua/go/sqlite3 only if WithUnsafeInterpreters(true)
               s.plugins[cmd]             # WASM plugins via wazero
               blocked (or next())        # external OS commands blocked by default
 ```
@@ -120,8 +137,8 @@ Every shell command is a separate file implementing `plugins.Plugin`. All are re
 | `awk.go` | `awk` | `github.com/benhoyt/goawk` |
 | `grep.go` | `grep` | stdlib |
 | `find.go` | `find` | stdlib |
-| `go.go` | `go` | `github.com/mvm-sh/mvm/interp` — `go run`, `go test`, `go fmt` |
-| `lua.go` | `lua` | `github.com/yuin/gopher-lua` |
+| `go.go` | `go` | `github.com/mvm-sh/mvm/interp` — `go run`, `go test`, `go fmt`; **gated**, see security model |
+| `lua.go` | `lua` | `github.com/yuin/gopher-lua` — **gated**, see security model |
 | `goja.go` | `goja` | `github.com/dop251/goja` |
 | `jq.go` | `jq` | `github.com/itchyny/gojq` |
 | `yq.go` | `yq` | `github.com/itchyny/gojq` + `gopkg.in/yaml.v3` |
@@ -137,7 +154,7 @@ Every shell command is a separate file implementing `plugins.Plugin`. All are re
 | `less.go` | `less`, `more` | pager UI (web terminal) |
 | `ssh.go` | `ssh` | stdlib `net` |
 | `crontab.go` | `crontab` | `github.com/robfig/cron/v3` |
-| `sqlite.go` | `sqlite3` | `modernc.org/sqlite` |
+| `sqlite.go` | `sqlite3` | `modernc.org/sqlite` — **gated**, see security model |
 | `git/git.go` | `git` | `github.com/go-git/go-git/v5` |
 
 `yq` parses YAML/JSON input, runs a jq expression, outputs YAML by default or JSON with `-j`. It normalises `yaml.v3` types through a JSON round-trip so gojq receives plain Go types.
@@ -233,7 +250,8 @@ Sessions are **always enabled** — no flag needed. Send `X-Session-ID: <id>` on
 
 ```toml
 [shell]
-wasm = true          # false = skip all WASM loading
+wasm = true                 # false = skip all WASM loading
+unsafe_interpreters = false # true = also register lua, go, sqlite3
 
 [plugins]
 wasm    = ["python"] # allowlist for ~/.memsh/plugins/*.wasm; empty = load all

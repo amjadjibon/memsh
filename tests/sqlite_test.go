@@ -13,7 +13,7 @@ import (
 func TestSQLiteBasic(t *testing.T) {
 	ctx := context.Background()
 	var buf strings.Builder
-	s := NewTestShell(t, &buf, shell.WithFS(afero.NewMemMapFs()))
+	s := NewInterpreterTestShell(t, &buf, shell.WithFS(afero.NewMemMapFs()))
 
 	script := `sqlite3 :memory: "CREATE TABLE users (id INTEGER, name TEXT); INSERT INTO users VALUES (1,'Alice'); SELECT id, name FROM users;"`
 	if err := s.Run(ctx, script); err != nil {
@@ -28,7 +28,7 @@ func TestSQLiteBasic(t *testing.T) {
 func TestSQLiteCSVMode(t *testing.T) {
 	ctx := context.Background()
 	var buf strings.Builder
-	s := NewTestShell(t, &buf, shell.WithFS(afero.NewMemMapFs()))
+	s := NewInterpreterTestShell(t, &buf, shell.WithFS(afero.NewMemMapFs()))
 
 	script := `sqlite3 -csv -header :memory: "CREATE TABLE t (a TEXT, b INTEGER); INSERT INTO t VALUES ('hello', 42); SELECT a, b FROM t;"`
 	if err := s.Run(ctx, script); err != nil {
@@ -50,7 +50,7 @@ func TestSQLiteCSVMode(t *testing.T) {
 func TestSQLiteJSONMode(t *testing.T) {
 	ctx := context.Background()
 	var buf strings.Builder
-	s := NewTestShell(t, &buf, shell.WithFS(afero.NewMemMapFs()))
+	s := NewInterpreterTestShell(t, &buf, shell.WithFS(afero.NewMemMapFs()))
 
 	script := `sqlite3 -json :memory: "CREATE TABLE t (name TEXT, val INTEGER); INSERT INTO t VALUES ('foo', 10); SELECT name, val FROM t;"`
 	if err := s.Run(ctx, script); err != nil {
@@ -68,7 +68,7 @@ func TestSQLiteJSONMode(t *testing.T) {
 func TestSQLiteLineMode(t *testing.T) {
 	ctx := context.Background()
 	var buf strings.Builder
-	s := NewTestShell(t, &buf, shell.WithFS(afero.NewMemMapFs()))
+	s := NewInterpreterTestShell(t, &buf, shell.WithFS(afero.NewMemMapFs()))
 
 	script := `sqlite3 -line :memory: "CREATE TABLE t (x TEXT); INSERT INTO t VALUES ('bar'); SELECT x FROM t;"`
 	if err := s.Run(ctx, script); err != nil {
@@ -83,7 +83,7 @@ func TestSQLiteLineMode(t *testing.T) {
 func TestSQLiteTableMode(t *testing.T) {
 	ctx := context.Background()
 	var buf strings.Builder
-	s := NewTestShell(t, &buf, shell.WithFS(afero.NewMemMapFs()))
+	s := NewInterpreterTestShell(t, &buf, shell.WithFS(afero.NewMemMapFs()))
 
 	script := `sqlite3 -table :memory: "CREATE TABLE t (col1 TEXT, col2 INTEGER); INSERT INTO t VALUES ('data', 99); SELECT col1, col2 FROM t;"`
 	if err := s.Run(ctx, script); err != nil {
@@ -112,6 +112,7 @@ func TestSQLiteFromStdin(t *testing.T) {
 
 	sql := "CREATE TABLE t (n INTEGER); INSERT INTO t VALUES (7); SELECT n FROM t;"
 	s, err := shell.New(
+		shell.WithUnsafeInterpreters(true),
 		shell.WithFS(afero.NewMemMapFs()),
 		shell.WithStdIO(strings.NewReader(sql), &buf, &buf),
 		shell.WithWASMEnabled(false),
@@ -132,7 +133,7 @@ func TestSQLiteFromStdin(t *testing.T) {
 func TestSQLiteDotTables(t *testing.T) {
 	ctx := context.Background()
 	var buf strings.Builder
-	s := NewTestShell(t, &buf, shell.WithFS(afero.NewMemMapFs()))
+	s := NewInterpreterTestShell(t, &buf, shell.WithFS(afero.NewMemMapFs()))
 
 	script := `sqlite3 :memory: "CREATE TABLE alpha (id INTEGER); CREATE TABLE beta (id INTEGER); .tables"`
 	if err := s.Run(ctx, script); err != nil {
@@ -150,7 +151,7 @@ func TestSQLiteDotTables(t *testing.T) {
 func TestSQLiteDotSchema(t *testing.T) {
 	ctx := context.Background()
 	var buf strings.Builder
-	s := NewTestShell(t, &buf, shell.WithFS(afero.NewMemMapFs()))
+	s := NewInterpreterTestShell(t, &buf, shell.WithFS(afero.NewMemMapFs()))
 
 	script := `sqlite3 :memory: "CREATE TABLE items (id INTEGER PRIMARY KEY, label TEXT); .schema"`
 	if err := s.Run(ctx, script); err != nil {
@@ -168,7 +169,7 @@ func TestSQLiteDotSchema(t *testing.T) {
 func TestSQLiteMultiStatement(t *testing.T) {
 	ctx := context.Background()
 	var buf strings.Builder
-	s := NewTestShell(t, &buf, shell.WithFS(afero.NewMemMapFs()))
+	s := NewInterpreterTestShell(t, &buf, shell.WithFS(afero.NewMemMapFs()))
 
 	script := `sqlite3 :memory: "CREATE TABLE t (v INTEGER); INSERT INTO t VALUES (1); INSERT INTO t VALUES (2); SELECT v FROM t ORDER BY v;"`
 	if err := s.Run(ctx, script); err != nil {
@@ -184,7 +185,7 @@ func TestSQLiteMultiStatement(t *testing.T) {
 func TestSQLiteNullValue(t *testing.T) {
 	ctx := context.Background()
 	var buf strings.Builder
-	s := NewTestShell(t, &buf, shell.WithFS(afero.NewMemMapFs()))
+	s := NewInterpreterTestShell(t, &buf, shell.WithFS(afero.NewMemMapFs()))
 
 	script := `sqlite3 -nullvalue "N/A" :memory: "CREATE TABLE t (v TEXT); INSERT INTO t VALUES (NULL); SELECT v FROM t;"`
 	if err := s.Run(ctx, script); err != nil {
@@ -202,7 +203,7 @@ func TestSQLiteVirtualFS(t *testing.T) {
 
 	// Shell 1: create a table and insert a row into /test.db
 	var buf1 strings.Builder
-	s1 := NewTestShell(t, &buf1, shell.WithFS(fs))
+	s1 := NewInterpreterTestShell(t, &buf1, shell.WithFS(fs))
 	script1 := `sqlite3 /test.db "CREATE TABLE kv (key TEXT, val TEXT); INSERT INTO kv VALUES ('greeting','hello');"`
 	if err := s1.Run(ctx, script1); err != nil {
 		t.Fatalf("shell1 error: %v", err)
@@ -210,7 +211,7 @@ func TestSQLiteVirtualFS(t *testing.T) {
 
 	// Shell 2: open the same /test.db from the shared FS and query it
 	var buf2 strings.Builder
-	s2 := NewTestShell(t, &buf2, shell.WithFS(fs))
+	s2 := NewInterpreterTestShell(t, &buf2, shell.WithFS(fs))
 	script2 := `sqlite3 /test.db "SELECT val FROM kv WHERE key='greeting';"`
 	if err := s2.Run(ctx, script2); err != nil {
 		t.Fatalf("shell2 error: %v", err)
@@ -224,7 +225,7 @@ func TestSQLiteVirtualFS(t *testing.T) {
 func TestSQLiteDotDump(t *testing.T) {
 	ctx := context.Background()
 	var buf strings.Builder
-	s := NewTestShell(t, &buf, shell.WithFS(afero.NewMemMapFs()))
+	s := NewInterpreterTestShell(t, &buf, shell.WithFS(afero.NewMemMapFs()))
 
 	script := `sqlite3 :memory: "CREATE TABLE dumptbl (id INTEGER, name TEXT); INSERT INTO dumptbl VALUES (1,'Row1'); .dump"`
 	if err := s.Run(ctx, script); err != nil {
@@ -261,6 +262,7 @@ SELECT id, label FROM items;
 .tables
 `)
 	s, err := shell.New(
+		shell.WithUnsafeInterpreters(true),
 		shell.WithStdIO(input, &buf, &buf),
 		shell.WithWASMEnabled(false),
 		shell.WithFS(afero.NewMemMapFs()),
@@ -288,7 +290,7 @@ SELECT id, label FROM items;
 func TestSQLiteSeparator(t *testing.T) {
 	ctx := context.Background()
 	var buf strings.Builder
-	s := NewTestShell(t, &buf, shell.WithFS(afero.NewMemMapFs()))
+	s := NewInterpreterTestShell(t, &buf, shell.WithFS(afero.NewMemMapFs()))
 
 	script := `sqlite3 -separator , :memory: "CREATE TABLE t (a TEXT, b TEXT); INSERT INTO t VALUES ('x','y'); SELECT a, b FROM t;"`
 	if err := s.Run(ctx, script); err != nil {

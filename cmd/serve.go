@@ -115,6 +115,12 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	}
 
 	cfg, _ := loadConfig()
+	// Serving lua/go/sqlite3 hands every client the ability to run real OS
+	// commands as the server user. Refuse to do that unauthenticated.
+	if (cfg.Shell.UnsafeInterpreters || unsafeInterps) && strings.TrimSpace(apiKey) == "" {
+		return fmt.Errorf("memsh serve: --unsafe-interpreters requires --api-key (%s can run host commands)",
+			strings.Join(shell.GatedInterpreterNames(), ", "))
+	}
 	baseOpts := buildShellOpts(cfg)
 	netPolicy, err := parseNetworkPolicy(serveNetFlags)
 	if err != nil {
@@ -199,6 +205,11 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	if !isLoopbackAddr(addr) && strings.TrimSpace(apiKey) == "" {
 		fmt.Fprintln(os.Stderr, "memsh serve: WARNING: listening on a non-loopback address without --api-key; remote clients can run unauthenticated commands")
 	}
+	if cfg.Shell.UnsafeInterpreters || unsafeInterps {
+		fmt.Fprintf(os.Stderr, "memsh serve: WARNING: unsafe interpreters enabled (%s); "+
+			"authenticated clients can run real OS commands as this user\n",
+			strings.Join(shell.GatedInterpreterNames(), ", "))
+	}
 	if sessionStorePath != "" {
 		fmt.Fprintf(os.Stderr, "memsh serve: durable session store: %s\n", sessionStorePath)
 	}
@@ -250,6 +261,9 @@ func buildShellOpts(cfg Config) []shell.Option {
 	var opts []shell.Option
 	if !cfg.Shell.WASM {
 		opts = append(opts, shell.WithWASMEnabled(false))
+	}
+	if cfg.Shell.UnsafeInterpreters || unsafeInterps {
+		opts = append(opts, shell.WithUnsafeInterpreters(true))
 	}
 	if len(cfg.Plugins.WASM) > 0 {
 		opts = append(opts, shell.WithPluginFilter(cfg.Plugins.WASM))

@@ -16,7 +16,7 @@ func TestLua(t *testing.T) {
 
 	t.Run("lua -e executes inline code", func(t *testing.T) {
 		var buf strings.Builder
-		s := tests.NewTestShell(t, &buf, shell.WithFS(afero.NewMemMapFs()))
+		s := tests.NewInterpreterTestShell(t, &buf, shell.WithFS(afero.NewMemMapFs()))
 		if err := s.Run(ctx, `lua -e 'print("hello from lua")'`); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -28,7 +28,7 @@ func TestLua(t *testing.T) {
 
 	t.Run("lua -e with math", func(t *testing.T) {
 		var buf strings.Builder
-		s := tests.NewTestShell(t, &buf, shell.WithFS(afero.NewMemMapFs()))
+		s := tests.NewInterpreterTestShell(t, &buf, shell.WithFS(afero.NewMemMapFs()))
 		if err := s.Run(ctx, `lua -e 'print(2 + 3)'`); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -43,7 +43,7 @@ func TestLua(t *testing.T) {
 		afero.WriteFile(fs, "/script.lua", []byte(`print("hello from file")`), 0o644)
 
 		var buf strings.Builder
-		s := tests.NewTestShell(t, &buf, shell.WithFS(fs))
+		s := tests.NewInterpreterTestShell(t, &buf, shell.WithFS(fs))
 		if err := s.Run(ctx, `lua /script.lua`); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -55,7 +55,7 @@ func TestLua(t *testing.T) {
 
 	t.Run("lua reads code from stdin", func(t *testing.T) {
 		var buf strings.Builder
-		s := tests.NewTestShell(t, &buf, shell.WithFS(afero.NewMemMapFs()))
+		s := tests.NewInterpreterTestShell(t, &buf, shell.WithFS(afero.NewMemMapFs()))
 		if err := s.Run(ctx, `echo 'print("stdin test")' | lua`); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -67,7 +67,7 @@ func TestLua(t *testing.T) {
 
 	t.Run("lua with syntax error", func(t *testing.T) {
 		var buf strings.Builder
-		s := tests.NewTestShell(t, &buf, shell.WithFS(afero.NewMemMapFs()))
+		s := tests.NewInterpreterTestShell(t, &buf, shell.WithFS(afero.NewMemMapFs()))
 		err := s.Run(ctx, `lua -e 'print("unclosed string'`)
 		if err == nil {
 			t.Fatal("expected error for invalid Lua syntax")
@@ -79,7 +79,7 @@ func TestLua(t *testing.T) {
 
 	t.Run("lua with table operations", func(t *testing.T) {
 		var buf strings.Builder
-		s := tests.NewTestShell(t, &buf, shell.WithFS(afero.NewMemMapFs()))
+		s := tests.NewInterpreterTestShell(t, &buf, shell.WithFS(afero.NewMemMapFs()))
 		if err := s.Run(ctx, `lua -e 't = {1, 2, 3}; print(#t)'`); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}

@@ -20,7 +20,7 @@ func TestGo(t *testing.T) {
 func main() { fmt.Println("hello from go run") }
 `), 0o644)
 		var buf strings.Builder
-		s := NewTestShell(t, &buf, shell.WithFS(fs))
+		s := NewInterpreterTestShell(t, &buf, shell.WithFS(fs))
 		if err := s.Run(ctx, `go run /main.go`); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -40,7 +40,7 @@ func main() {
 }
 `), 0o644)
 		var buf strings.Builder
-		s := NewTestShell(t, &buf, shell.WithFS(fs))
+		s := NewInterpreterTestShell(t, &buf, shell.WithFS(fs))
 		if err := s.Run(ctx, `go run /counter.go`); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -52,7 +52,7 @@ func main() {
 
 	t.Run("go run reports missing file", func(t *testing.T) {
 		var buf strings.Builder
-		s := NewTestShell(t, &buf, shell.WithFS(afero.NewMemMapFs()))
+		s := NewInterpreterTestShell(t, &buf, shell.WithFS(afero.NewMemMapFs()))
 		if err := s.Run(ctx, `go run /nope.go`); err == nil {
 			t.Fatal("expected error for missing file")
 		}
@@ -62,7 +62,7 @@ func main() {
 
 	t.Run("echo creates file and go run executes it", func(t *testing.T) {
 		var buf strings.Builder
-		s := NewTestShell(t, &buf, shell.WithFS(afero.NewMemMapFs()))
+		s := NewInterpreterTestShell(t, &buf, shell.WithFS(afero.NewMemMapFs()))
 		script := `
 echo 'package main' > /hello.go
 echo 'func main() { fmt.Println("created and run") }' >> /hello.go
@@ -89,7 +89,7 @@ func TestAdd(t *testing.T) {
 }
 `), 0o644)
 		var buf strings.Builder
-		s := NewTestShell(t, &buf, shell.WithFS(fs))
+		s := NewInterpreterTestShell(t, &buf, shell.WithFS(fs))
 		if err := s.Run(ctx, `go test /`); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -106,7 +106,7 @@ import "testing"
 func TestFoo(t *testing.T) {}
 `), 0o644)
 		var buf strings.Builder
-		s := NewTestShell(t, &buf, shell.WithFS(fs))
+		s := NewInterpreterTestShell(t, &buf, shell.WithFS(fs))
 		if err := s.Run(ctx, `go test ./...`); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -123,7 +123,7 @@ func TestFoo(t *testing.T) {}
 func main(){fmt.Println("hello")}
 `), 0o644)
 		var buf strings.Builder
-		s := NewTestShell(t, &buf, shell.WithFS(fs))
+		s := NewInterpreterTestShell(t, &buf, shell.WithFS(fs))
 		if err := s.Run(ctx, `go fmt /ugly.go`); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -137,7 +137,7 @@ func main(){fmt.Println("hello")}
 
 	t.Run("go version prints version string", func(t *testing.T) {
 		var buf strings.Builder
-		s := NewTestShell(t, &buf, shell.WithFS(afero.NewMemMapFs()))
+		s := NewInterpreterTestShell(t, &buf, shell.WithFS(afero.NewMemMapFs()))
 		if err := s.Run(ctx, `go version`); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -150,7 +150,7 @@ func main(){fmt.Println("hello")}
 
 	t.Run("echo pipe to go executes source from stdin", func(t *testing.T) {
 		var buf strings.Builder
-		s := NewTestShell(t, &buf, shell.WithFS(afero.NewMemMapFs()))
+		s := NewInterpreterTestShell(t, &buf, shell.WithFS(afero.NewMemMapFs()))
 		if err := s.Run(ctx, `echo 'fmt.Println("via stdin pipe")' | go`); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}

@@ -21,6 +21,15 @@ func NewTestShell(t testingT, buf *strings.Builder, opts ...shell.Option) *shell
 	return s
 }
 
+// NewInterpreterTestShell creates a shell with the gated interpreter plugins
+// (lua, go, sqlite3) registered. They are off by default because they can run
+// real OS commands and touch the real filesystem — see WithUnsafeInterpreters.
+// Use this only in tests that exercise those commands directly.
+func NewInterpreterTestShell(t testingT, buf *strings.Builder, opts ...shell.Option) *shell.Shell {
+	t.Helper()
+	return NewTestShell(t, buf, append([]shell.Option{shell.WithUnsafeInterpreters(true)}, opts...)...)
+}
+
 // NewTestShellWithBuffer creates a shell with bytes.Buffer for output
 func NewTestShellWithBuffer(t testingT, buf *strings.Builder, opts ...shell.Option) *shell.Shell {
 	t.Helper()

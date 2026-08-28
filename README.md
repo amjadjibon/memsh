@@ -5,7 +5,9 @@
 [![Go Report Card](https://goreportcard.com/badge/github.com/amjadjibon/memsh)](https://goreportcard.com/report/github.com/amjadjibon/memsh)
 [![codecov](https://codecov.io/gh/amjadjibon/memsh/branch/main/graph/badge.svg)](https://codecov.io/gh/amjadjibon/memsh)
 
-A virtual bash shell implemented in Go. memsh executes bash-like commands against an in-memory filesystem — the real OS filesystem is never touched, and external OS commands are blocked by default.
+A virtual bash shell implemented in Go. memsh executes bash-like commands against an in-memory filesystem — the real OS filesystem is not touched, and external OS commands are blocked by default.
+
+> **Scope of that guarantee.** It covers the built-in commands and WASM plugins. The `lua`, `go` and `sqlite3` commands embed third-party interpreters that come with their own host access (`os.execute`, `os/exec`, SQLite `ATTACH`), which memsh cannot revoke — so they are **off by default** and require `--unsafe-interpreters`. See [Security model](#security-model).
 
 Shell parsing and interpretation is handled by [mvdan.cc/sh/v3](https://github.com/mvdan/sh). Every command is a native Go plugin or WASM plugin — there is no reliance on host system binaries.
 
@@ -379,11 +381,65 @@ Installed runtimes are stored in `~/.memsh/plugins/*.wasm`.
 | `WithPluginFilter(names)` | Allowlist for WASM plugin discovery |
 | `WithDisabledPlugins(names...)` | Exclude specific plugins by name |
 | `WithAllowExternalCommands(bool)` | Allow falling back to real OS executables (default: false) |
+| `WithUnsafeInterpreters(bool)` | Register `lua`, `go`, `sqlite3` — interpreters with host access (default: false) |
 | `WithInheritEnv(bool)` | Inherit parent process environment (default: true; use false in server mode) |
 | `WithAliases(map)` | Pre-seed the alias table |
 | `WithNetworkPolicy(policy)` | Set outbound network policy (`off`, `allowlist`, `full`) |
 | `WithNetworkLimits(limits)` | Set network request/bytes/runtime limits |
 | `WithNetworkUsage(usage)` | Seed cumulative network usage (for restored sessions) |
+
+## Security model
+
+memsh blocks external OS commands by default: only registered plugins run, and
+file I/O is routed to the in-memory filesystem. `WithAllowExternalCommands(true)`
+opts out.
+
+Treat this as a **useful boundary, not a hard sandbox.**
+
+**What the boundary covers**
+
+- Built-in commands, which are written against the virtual filesystem.
+- WASM plugins. wazero gives a module no ambient authority — it can call only
+  what the host imports into it. memsh imports one namespace, WASI preview1,
+  whose entire process surface is `proc_exit`: there is no `exec` to call, and
+  no `sock_connect` either. The only mount is the afero filesystem, and no
+  symlink operations are implemented, so path traversal has nowhere to go.
+
+**What it does not cover**
+
+Three commands embed a third-party interpreter that arrives already wired to the
+host OS. memsh cannot revoke that from outside the library, so they are **off by
+default**:
+
+| Command | Host access it carries |
+| --- | --- |
+| `lua` | gopher-lua opens the full Lua stdlib — `os.execute` runs real commands, `io.open` reads and writes real files |
+| `go` | mvm binds the entire Go stdlib, including `os/exec` and `syscall` |
+| `sqlite3` | runs against a real OS temp file, so `ATTACH DATABASE` and `VACUUM INTO` reach arbitrary real paths |
+
+Enable them only for scripts you trust as much as the host process:
+
+```bash
+memsh --unsafe-interpreters script.sh
+```
+
+```go
+sh, _ := shell.New(shell.WithUnsafeInterpreters(true))
+```
+
+`memsh serve` refuses `--unsafe-interpreters` unless `--api-key` is also set,
+and warns at startup when they are active. Do not enable them for input that
+arrives over a network or from a language model.
+
+**Other limits worth knowing**
+
+- WASM modules run without an explicit memory cap; the per-request timeout
+  bounds execution time, not memory.
+- `plugin install` downloads runtimes over HTTPS but verifies no checksum or
+  signature.
+- `source http://...` executes a remote script over plaintext HTTP.
+- `GET /sessions` lists live session IDs, and a session ID is all that is needed
+  to attach to that session. Treat `memsh serve` as single-tenant.
 
 ## HTTP Server
 
@@ -458,7 +514,7 @@ memsh has two modes for connecting LLMs: an **MCP server** (any MCP-compatible c
 
 ### MCP Server (`memsh mcp`)
 
-The MCP server exposes a single `memsh` tool that lets any LLM execute bash commands in a sandboxed in-memory filesystem. The real OS is never touched.
+The MCP server exposes a single `memsh` tool that lets any LLM execute bash commands in an in-memory filesystem. With the default command set the real OS is not touched — do not enable `--unsafe-interpreters` for a model-driven session.
 
 **Transports:**
 
@@ -517,7 +573,8 @@ Cwd: /home/user/data
 
 ```toml
 [shell]
-wasm = true          # set false to skip all WASM loading (faster startup)
+wasm = true                 # set false to skip all WASM loading (faster startup)
+unsafe_interpreters = false # true = also register lua, go, sqlite3 (see Security model)
 
 [plugins]
 wasm    = ["python"] # allowlist of ~/.memsh/plugins/*.wasm names; empty = load all
