@@ -86,6 +86,10 @@ doneFlags:
 			for scanner.Scan() {
 				row = append(row, scanner.Text())
 			}
+			if err := scanner.Err(); err != nil {
+				fmt.Fprintf(hc.Stderr, "paste: %v\n", err)
+				return interp.ExitStatus(1)
+			}
 			fmt.Fprintln(hc.Stdout, strings.Join(row, delim))
 		}
 		return nil
@@ -112,6 +116,14 @@ doneFlags:
 			break
 		}
 		fmt.Fprintln(hc.Stdout, strings.Join(cols, delim))
+	}
+	// A scanner that failed stops yielding lines, which the loop above
+	// cannot tell apart from EOF.
+	for _, s := range scanners {
+		if err := s.Err(); err != nil {
+			fmt.Fprintf(hc.Stderr, "paste: %v\n", err)
+			return interp.ExitStatus(1)
+		}
 	}
 	return nil
 }

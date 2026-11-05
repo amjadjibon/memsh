@@ -56,3 +56,24 @@ func TestPaste(t *testing.T) {
 		}
 	})
 }
+
+// TestPasteReportsReadErrors checks that a scanner failure (here a line over
+// bufio's 64 KiB token limit) is an error, not a silent early EOF.
+func TestPasteReportsReadErrors(t *testing.T) {
+	for _, script := range []string{"paste -s /big", "paste /big /small"} {
+		t.Run(script, func(t *testing.T) {
+			fs := afero.NewMemMapFs()
+			_ = afero.WriteFile(fs, "/big", []byte(strings.Repeat("x", 70000)+"\n"), 0o644)
+			_ = afero.WriteFile(fs, "/small", []byte("1\n"), 0o644)
+			var buf strings.Builder
+			s := NewTestShell(t, &buf, shell.WithFS(fs))
+			err := s.Run(context.Background(), script)
+			if err == nil {
+				t.Fatal("expected an error")
+			}
+			if !strings.Contains(buf.String(), "token too long") {
+				t.Fatalf("expected the scanner error on stderr, got %q", buf.String())
+			}
+		})
+	}
+}
