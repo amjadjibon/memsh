@@ -55,9 +55,12 @@ homebrew_casks:
       owner: amjadjibon
       name: homebrew-tap
       branch: main
-      # Separate PAT with push access to the tap repo; the release itself uses
-      # the workflow's GITHUB_TOKEN.
-      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+      # Push over SSH with a write deploy key scoped to the tap repo only
+      # (secret HOMEBREW_TAP_DEPLOY_KEY). The release itself uses the
+      # workflow's GITHUB_TOKEN.
+      git:
+        url: "git@github.com:amjadjibon/homebrew-tap.git"
+        private_key: "{{ .Env.HOMEBREW_TAP_DEPLOY_KEY }}"
     url:
       template: "https://github.com/amjadjibon/memsh/releases/download/{{ .Tag }}/{{ .ArtifactName }}"
     generate_completions_from_executable:

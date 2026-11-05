@@ -32,7 +32,7 @@ jobs:
           args: release --clean
         env:
           # The release is created with the workflow token, which cannot
-          # expire. HOMEBREW_TAP_GITHUB_TOKEN (classic PAT, repo scope on
-          # amjadjibon/homebrew-tap) is used only to push the cask.
+          # expire. The cask is pushed to amjadjibon/homebrew-tap with a
+          # write deploy key scoped to that repo only.
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+          HOMEBREW_TAP_DEPLOY_KEY: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
