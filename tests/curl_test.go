@@ -63,7 +63,7 @@ func TestCurl(t *testing.T) {
 
 	t.Run("GET request outputs body", func(t *testing.T) {
 		var buf strings.Builder
-		s := NewTestShell(t, &buf, shell.WithFS(afero.NewMemMapFs()))
+		s := NewTestShell(t, &buf, WithLoopbackNetwork(), shell.WithFS(afero.NewMemMapFs()))
 		if err := s.Run(ctx, "curl "+srv.URL+"/hello"); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -74,7 +74,7 @@ func TestCurl(t *testing.T) {
 
 	t.Run("POST with -d sends body", func(t *testing.T) {
 		var buf strings.Builder
-		s := NewTestShell(t, &buf, shell.WithFS(afero.NewMemMapFs()))
+		s := NewTestShell(t, &buf, WithLoopbackNetwork(), shell.WithFS(afero.NewMemMapFs()))
 		if err := s.Run(ctx, `curl -X POST -d 'payload' `+srv.URL+`/echo`); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -85,7 +85,7 @@ func TestCurl(t *testing.T) {
 
 	t.Run("-d implies POST", func(t *testing.T) {
 		var buf strings.Builder
-		s := NewTestShell(t, &buf, shell.WithFS(afero.NewMemMapFs()))
+		s := NewTestShell(t, &buf, WithLoopbackNetwork(), shell.WithFS(afero.NewMemMapFs()))
 		if err := s.Run(ctx, `curl -d 'auto-post' `+srv.URL+`/echo`); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -96,7 +96,7 @@ func TestCurl(t *testing.T) {
 
 	t.Run("-L follows redirect", func(t *testing.T) {
 		var buf strings.Builder
-		s := NewTestShell(t, &buf, shell.WithFS(afero.NewMemMapFs()))
+		s := NewTestShell(t, &buf, WithLoopbackNetwork(), shell.WithFS(afero.NewMemMapFs()))
 		if err := s.Run(ctx, "curl -L "+srv.URL+"/redirect"); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -108,7 +108,7 @@ func TestCurl(t *testing.T) {
 	t.Run("-o saves to virtual FS", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
 		var buf strings.Builder
-		s := NewTestShell(t, &buf, shell.WithFS(fs))
+		s := NewTestShell(t, &buf, WithLoopbackNetwork(), shell.WithFS(fs))
 		if err := s.Run(ctx, "curl -o /out.txt "+srv.URL+"/hello"); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -124,7 +124,7 @@ func TestCurl(t *testing.T) {
 	t.Run("-O saves to basename", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
 		var buf strings.Builder
-		s := NewTestShell(t, &buf, shell.WithFS(fs))
+		s := NewTestShell(t, &buf, WithLoopbackNetwork(), shell.WithFS(fs))
 		if err := s.Run(ctx, "curl -O "+srv.URL+"/hello"); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -139,7 +139,7 @@ func TestCurl(t *testing.T) {
 
 	t.Run("-H sets custom header", func(t *testing.T) {
 		var buf strings.Builder
-		s := NewTestShell(t, &buf, shell.WithFS(afero.NewMemMapFs()))
+		s := NewTestShell(t, &buf, WithLoopbackNetwork(), shell.WithFS(afero.NewMemMapFs()))
 		if err := s.Run(ctx, `curl -A 'myagent' `+srv.URL+`/headers`); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -150,7 +150,7 @@ func TestCurl(t *testing.T) {
 
 	t.Run("-u sets basic auth", func(t *testing.T) {
 		var buf strings.Builder
-		s := NewTestShell(t, &buf, shell.WithFS(afero.NewMemMapFs()))
+		s := NewTestShell(t, &buf, WithLoopbackNetwork(), shell.WithFS(afero.NewMemMapFs()))
 		if err := s.Run(ctx, `curl -u user:pass `+srv.URL+`/headers`); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -161,7 +161,7 @@ func TestCurl(t *testing.T) {
 
 	t.Run("-i includes response headers", func(t *testing.T) {
 		var buf strings.Builder
-		s := NewTestShell(t, &buf, shell.WithFS(afero.NewMemMapFs()))
+		s := NewTestShell(t, &buf, WithLoopbackNetwork(), shell.WithFS(afero.NewMemMapFs()))
 		if err := s.Run(ctx, "curl -i "+srv.URL+"/hello"); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -176,7 +176,7 @@ func TestCurl(t *testing.T) {
 
 	t.Run("-I HEAD request", func(t *testing.T) {
 		var buf strings.Builder
-		s := NewTestShell(t, &buf, shell.WithFS(afero.NewMemMapFs()))
+		s := NewTestShell(t, &buf, WithLoopbackNetwork(), shell.WithFS(afero.NewMemMapFs()))
 		if err := s.Run(ctx, "curl -I "+srv.URL+"/hello"); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -192,7 +192,7 @@ func TestCurl(t *testing.T) {
 	t.Run("shell redirect > saves body to virtual FS", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
 		var buf strings.Builder
-		s := NewTestShell(t, &buf, shell.WithFS(fs))
+		s := NewTestShell(t, &buf, WithLoopbackNetwork(), shell.WithFS(fs))
 		if err := s.Run(ctx, "curl "+srv.URL+"/hello > /out.txt"); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -207,7 +207,7 @@ func TestCurl(t *testing.T) {
 
 	t.Run("pipe curl into wc", func(t *testing.T) {
 		var buf strings.Builder
-		s := NewTestShell(t, &buf, shell.WithFS(afero.NewMemMapFs()))
+		s := NewTestShell(t, &buf, WithLoopbackNetwork(), shell.WithFS(afero.NewMemMapFs()))
 		if err := s.Run(ctx, "curl "+srv.URL+"/hello | wc -c"); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}

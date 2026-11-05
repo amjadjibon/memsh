@@ -251,3 +251,31 @@ func TestPortAllowed(t *testing.T) {
 		t.Error("empty allowlist should allow all ports")
 	}
 }
+
+func TestIsPrivateOrReservedCoversSpecialRanges(t *testing.T) {
+	blocked := []string{
+		"127.0.0.1", "10.1.2.3", "172.16.0.1", "192.168.1.1", "169.254.169.254",
+		"100.64.0.1", "100.100.100.200", // CGNAT / some cloud metadata
+		"0.1.2.3", "192.0.0.170", "198.18.0.1", "203.0.113.9", "240.0.0.1", "255.255.255.255",
+		"::1", "fd00::1", "fe80::1", "::ffff:127.0.0.1", "::ffff:10.0.0.1",
+		"64:ff9b::a9fe:a9fe", // NAT64 of 169.254.169.254
+		"2002:7f00:1::1",     // 6to4 of 127.0.0.1
+		"2001:db8::1",
+	}
+	for _, s := range blocked {
+		if !isPrivateOrReserved(netip.MustParseAddr(s)) {
+			t.Errorf("%s should be blocked", s)
+		}
+	}
+	for _, s := range []string{"1.1.1.1", "8.8.8.8", "2606:4700:4700::1111", "100.128.0.1"} {
+		if isPrivateOrReserved(netip.MustParseAddr(s)) {
+			t.Errorf("%s should be allowed", s)
+		}
+	}
+}
+
+func TestDefaultPolicyDeniesPrivateRanges(t *testing.T) {
+	if !DefaultPolicy().DenyPrivateRanges {
+		t.Fatal("DefaultPolicy must deny private/reserved ranges")
+	}
+}

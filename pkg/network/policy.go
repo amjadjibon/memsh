@@ -30,11 +30,12 @@ type Policy struct {
 	DenyPrivateRanges bool
 }
 
-// DefaultPolicy returns a permissive policy for library/local use
-// (no destination restrictions). Serve/CLI apply DenyPrivateRanges via
-// parseNetworkPolicy (cmd/flags.go).
+// DefaultPolicy allows any public destination but denies loopback, private,
+// link-local and other reserved ranges, so an embedded shell cannot be used
+// to reach services on the host or its network (SSRF). Use WithNetworkPolicy
+// with AllowCIDRs, or DenyPrivateRanges: false, to reach internal hosts.
 func DefaultPolicy() Policy {
-	return Policy{Mode: ModeFull}
+	return Policy{Mode: ModeFull, DenyPrivateRanges: true}
 }
 
 // Resolver resolves hostnames to IP addresses.
@@ -63,13 +64,50 @@ func normalizeHost(host string) string {
 	return host
 }
 
+// reservedPrefixes are special-purpose ranges not covered by the netip
+// predicates below. Several route to internal infrastructure in practice:
+// CGNAT space (also used by cloud metadata services and tailnets), NAT64
+// prefixes that embed an IPv4 address, and 6to4.
+var reservedPrefixes = func() []netip.Prefix {
+	var out []netip.Prefix
+	for _, p := range []string{
+		"0.0.0.0/8",       // "this network"
+		"100.64.0.0/10",   // shared address space (CGNAT)
+		"192.0.0.0/24",    // IETF protocol assignments
+		"192.0.2.0/24",    // TEST-NET-1
+		"198.18.0.0/15",   // benchmarking
+		"198.51.100.0/24", // TEST-NET-2
+		"203.0.113.0/24",  // TEST-NET-3
+		"240.0.0.0/4",     // reserved, includes 255.255.255.255
+		"64:ff9b::/96",    // NAT64 well-known prefix
+		"64:ff9b:1::/48",  // local-use NAT64
+		"100::/64",        // discard-only
+		"2001:db8::/32",   // documentation
+		"2002::/16",       // 6to4 (embeds an IPv4 address)
+		"fec0::/10",       // deprecated site-local
+	} {
+		out = append(out, netip.MustParsePrefix(p))
+	}
+	return out
+}()
+
 func isPrivateOrReserved(addr netip.Addr) bool {
-	return addr.IsPrivate() ||
+	addr = addr.Unmap()
+	if addr.IsPrivate() ||
 		addr.IsLoopback() ||
 		addr.IsLinkLocalMulticast() ||
 		addr.IsLinkLocalUnicast() ||
+		addr.IsInterfaceLocalMulticast() ||
 		addr.IsMulticast() ||
-		addr.IsUnspecified()
+		addr.IsUnspecified() {
+		return true
+	}
+	for _, p := range reservedPrefixes {
+		if p.Contains(addr) {
+			return true
+		}
+	}
+	return false
 }
 
 func domainAllowed(host string, allow []string) bool {

@@ -1,9 +1,11 @@
 package tests
 
 import (
+	"net/netip"
 	"os"
 	"strings"
 
+	"github.com/amjadjibon/memsh/pkg/network"
 	"github.com/amjadjibon/memsh/pkg/shell"
 )
 
@@ -73,4 +75,18 @@ func RealTmpDir(t testingT) string {
 	}
 	// Note: in real tests you'd register t.Cleanup
 	return dir
+}
+
+// WithLoopbackNetwork lets a test shell reach loopback test servers. The
+// default network policy denies loopback/private ranges; this allows only
+// 127.0.0.0/8 and ::1 on top of it.
+func WithLoopbackNetwork() shell.Option {
+	return shell.WithNetworkPolicy(network.Policy{
+		Mode:              network.ModeFull,
+		DenyPrivateRanges: true,
+		AllowCIDRs: []netip.Prefix{
+			netip.MustParsePrefix("127.0.0.0/8"),
+			netip.MustParsePrefix("::1/128"),
+		},
+	})
 }

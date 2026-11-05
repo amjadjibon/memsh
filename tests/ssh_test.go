@@ -164,7 +164,7 @@ func TestSSH(t *testing.T) {
 		clientFS := afero.NewMemMapFs()
 		seedKnownHosts(t, clientFS, addr, hostKey)
 		var buf strings.Builder
-		s := NewTestShell(t, &buf, shell.WithFS(clientFS))
+		s := NewTestShell(t, &buf, WithLoopbackNetwork(), shell.WithFS(clientFS))
 		err := s.Run(ctx, fmt.Sprintf("ssh -P %s memsh@%s -- echo hello", port, host))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -182,7 +182,7 @@ func TestSSH(t *testing.T) {
 		clientFS := afero.NewMemMapFs()
 		seedKnownHosts(t, clientFS, addr, hostKey)
 		var buf strings.Builder
-		s := NewTestShell(t, &buf, shell.WithFS(clientFS))
+		s := NewTestShell(t, &buf, WithLoopbackNetwork(), shell.WithFS(clientFS))
 		err := s.Run(ctx, fmt.Sprintf("ssh -p secret -P %s memsh@%s -- echo auth_ok", port, host))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -200,7 +200,7 @@ func TestSSH(t *testing.T) {
 		seedKnownHosts(t, clientFS, addr, hostKey)
 
 		var buf strings.Builder
-		s := NewTestShell(t, &buf, shell.WithFS(clientFS))
+		s := NewTestShell(t, &buf, WithLoopbackNetwork(), shell.WithFS(clientFS))
 		err := s.Run(ctx, fmt.Sprintf("ssh -p wrong -P %s memsh@%s -- echo hi", port, host))
 		if err == nil {
 			t.Fatal("expected error for wrong password, got nil")
@@ -209,7 +209,7 @@ func TestSSH(t *testing.T) {
 
 	t.Run("unreachable host exits 255", func(t *testing.T) {
 		var buf strings.Builder
-		s := NewTestShell(t, &buf, shell.WithFS(afero.NewMemMapFs()))
+		s := NewTestShell(t, &buf, WithLoopbackNetwork(), shell.WithFS(afero.NewMemMapFs()))
 		err := s.Run(ctx, "ssh -P 19999 127.0.0.1 -- echo hi")
 		if exitCode(err) != 255 {
 			t.Errorf("expected exit 255 for unreachable host, got: %v", err)
@@ -224,7 +224,7 @@ func TestSSH(t *testing.T) {
 		clientFS := afero.NewMemMapFs()
 		seedKnownHosts(t, clientFS, addr, hostKey)
 		var buf strings.Builder
-		s := NewTestShell(t, &buf, shell.WithFS(clientFS))
+		s := NewTestShell(t, &buf, WithLoopbackNetwork(), shell.WithFS(clientFS))
 
 		// Create a file on the remote.
 		if err := s.Run(ctx, fmt.Sprintf("ssh -P %s %s -- 'echo remote > /remotefile.txt'", port, host)); err != nil {
@@ -239,7 +239,7 @@ func TestSSH(t *testing.T) {
 
 	t.Run("missing host argument exits 1", func(t *testing.T) {
 		var buf strings.Builder
-		s := NewTestShell(t, &buf, shell.WithFS(afero.NewMemMapFs()))
+		s := NewTestShell(t, &buf, WithLoopbackNetwork(), shell.WithFS(afero.NewMemMapFs()))
 		err := s.Run(ctx, "ssh")
 		if exitCode(err) != 1 {
 			t.Errorf("expected exit 1 for missing host, got: %v", err)

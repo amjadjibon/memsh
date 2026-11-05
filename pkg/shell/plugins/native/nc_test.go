@@ -46,7 +46,7 @@ func TestNc(t *testing.T) {
 		defer ln.Close()
 
 		var buf strings.Builder
-		s := tests.NewTestShell(t, &buf, shell.WithFS(afero.NewMemMapFs()))
+		s := tests.NewTestShell(t, &buf, tests.WithLoopbackNetwork(), shell.WithFS(afero.NewMemMapFs()))
 
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
@@ -61,7 +61,7 @@ func TestNc(t *testing.T) {
 
 	t.Run("listen mode disabled by default", func(t *testing.T) {
 		var buf strings.Builder
-		s := tests.NewTestShell(t, &buf, shell.WithFS(afero.NewMemMapFs()))
+		s := tests.NewTestShell(t, &buf, tests.WithLoopbackNetwork(), shell.WithFS(afero.NewMemMapFs()))
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 		err := s.Run(ctx, "nc -l -w 1 127.0.0.1 19999")
@@ -77,7 +77,7 @@ func TestNc(t *testing.T) {
 		port := freePort(t)
 
 		var buf strings.Builder
-		s := tests.NewTestShell(t, &buf, shell.WithFS(afero.NewMemMapFs()), shell.WithAllowHostListen(true))
+		s := tests.NewTestShell(t, &buf, tests.WithLoopbackNetwork(), shell.WithFS(afero.NewMemMapFs()), shell.WithAllowHostListen(true))
 
 		// Run nc -l in background; connect a client after a short delay.
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -110,7 +110,7 @@ func TestNc(t *testing.T) {
 		defer ln.Close()
 
 		var buf strings.Builder
-		s := tests.NewTestShell(t, &buf, shell.WithFS(afero.NewMemMapFs()))
+		s := tests.NewTestShell(t, &buf, tests.WithLoopbackNetwork(), shell.WithFS(afero.NewMemMapFs()))
 
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
@@ -128,7 +128,7 @@ func TestNc(t *testing.T) {
 		port := freePort(t) // Nothing listening on this port.
 
 		var buf strings.Builder
-		s := tests.NewTestShell(t, &buf, shell.WithFS(afero.NewMemMapFs()))
+		s := tests.NewTestShell(t, &buf, tests.WithLoopbackNetwork(), shell.WithFS(afero.NewMemMapFs()))
 
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
@@ -156,7 +156,7 @@ func TestNc(t *testing.T) {
 		hi := openPort + 2
 
 		var buf strings.Builder
-		s := tests.NewTestShell(t, &buf, shell.WithFS(afero.NewMemMapFs()))
+		s := tests.NewTestShell(t, &buf, tests.WithLoopbackNetwork(), shell.WithFS(afero.NewMemMapFs()))
 
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -171,7 +171,7 @@ func TestNc(t *testing.T) {
 
 	t.Run("missing host/port returns error", func(t *testing.T) {
 		var buf strings.Builder
-		s := tests.NewTestShell(t, &buf, shell.WithFS(afero.NewMemMapFs()))
+		s := tests.NewTestShell(t, &buf, tests.WithLoopbackNetwork(), shell.WithFS(afero.NewMemMapFs()))
 		if err := s.Run(context.Background(), "nc"); err == nil {
 			t.Error("expected error for missing operands")
 		}
@@ -196,7 +196,7 @@ func TestNc(t *testing.T) {
 		defer ln.Close()
 
 		var buf strings.Builder
-		s := tests.NewTestShell(t, &buf, shell.WithFS(afero.NewMemMapFs()))
+		s := tests.NewTestShell(t, &buf, tests.WithLoopbackNetwork(), shell.WithFS(afero.NewMemMapFs()))
 
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()

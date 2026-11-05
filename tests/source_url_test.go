@@ -33,7 +33,7 @@ func TestSourceURL(t *testing.T) {
 	})
 
 	var buf strings.Builder
-	s := NewTestShell(t, &buf)
+	s := NewTestShell(t, &buf, WithLoopbackNetwork())
 	defer s.Close()
 
 	err := s.Run(context.Background(), fmt.Sprintf("source %s/hello.sh", srv.URL))
@@ -51,7 +51,7 @@ func TestSourceURLDotAlias(t *testing.T) {
 	})
 
 	var buf strings.Builder
-	s := NewTestShell(t, &buf)
+	s := NewTestShell(t, &buf, WithLoopbackNetwork())
 	defer s.Close()
 
 	ctx := context.Background()
@@ -74,7 +74,7 @@ TARGET=world
 	})
 
 	var buf strings.Builder
-	s := NewTestShell(t, &buf)
+	s := NewTestShell(t, &buf, WithLoopbackNetwork())
 	defer s.Close()
 
 	ctx := context.Background()
@@ -93,7 +93,7 @@ func TestSourceURLDefinesFunction(t *testing.T) {
 	})
 
 	var buf strings.Builder
-	s := NewTestShell(t, &buf)
+	s := NewTestShell(t, &buf, WithLoopbackNetwork())
 	defer s.Close()
 
 	ctx := context.Background()
@@ -110,7 +110,7 @@ func TestSourceURLNotFound(t *testing.T) {
 	srv := startScriptServer(t, map[string]string{})
 
 	var buf strings.Builder
-	s := NewTestShell(t, &buf)
+	s := NewTestShell(t, &buf, WithLoopbackNetwork())
 	defer s.Close()
 
 	// A 404 response should cause source to fail (non-nil error or non-zero exit).
@@ -139,7 +139,7 @@ func TestSourceURLChained(t *testing.T) {
 	_ = srv // unused placeholder, srvReal is the real server
 
 	var buf strings.Builder
-	s := NewTestShell(t, &buf)
+	s := NewTestShell(t, &buf, WithLoopbackNetwork())
 	defer s.Close()
 
 	ctx := context.Background()
@@ -158,7 +158,7 @@ func TestSourceURLMixedWithFile(t *testing.T) {
 	})
 
 	var buf strings.Builder
-	s := NewTestShell(t, &buf)
+	s := NewTestShell(t, &buf, WithLoopbackNetwork())
 	defer s.Close()
 
 	ctx := context.Background()
