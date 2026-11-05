@@ -46,6 +46,9 @@ func runTail(ctx context.Context, args []string) error {
 				return fmt.Errorf("tail: invalid number of lines: '%s'", a[2:])
 			}
 			n = v
+		case isLegacyCount(a):
+			// Historical "-N" form, e.g. "tail -5".
+			n, _ = strconv.Atoi(a[1:])
 		case a == "-c":
 			if i+1 >= len(args) {
 				return fmt.Errorf("tail: option requires an argument -- 'c'")

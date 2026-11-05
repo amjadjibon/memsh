@@ -46,6 +46,9 @@ func runHead(ctx context.Context, args []string) error {
 				return fmt.Errorf("head: invalid number of lines: '%s'", a[2:])
 			}
 			n = v
+		case isLegacyCount(a):
+			// Historical "-N" form, e.g. "head -5".
+			n, _ = strconv.Atoi(a[1:])
 		case a == "-c":
 			if i+1 >= len(args) {
 				return fmt.Errorf("head: option requires an argument -- 'c'")

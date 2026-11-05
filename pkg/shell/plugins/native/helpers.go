@@ -251,3 +251,17 @@ const (
 	virtualGID      = "1000"
 	virtualHostname = "memsh"
 )
+
+// isLegacyCount reports whether a is the historical "-N" count form accepted
+// by head and tail (a dash followed only by digits).
+func isLegacyCount(a string) bool {
+	if len(a) < 2 || a[0] != '-' {
+		return false
+	}
+	for _, c := range a[1:] {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
+}
