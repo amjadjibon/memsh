@@ -6,6 +6,9 @@ import (
 	"net"
 	"strings"
 	"testing"
+
+	"github.com/go-git/go-git/v5/plumbing/transport"
+	gitclient "github.com/go-git/go-git/v5/plumbing/transport/client"
 )
 
 func TestCheckRemoteURL(t *testing.T) {
@@ -19,18 +22,18 @@ func TestCheckRemoteURL(t *testing.T) {
 	}{
 		{"nil dialer", nil, "https://example.com/repo.git", "network dialer not configured"},
 		{"empty url", dial, "", "empty remote URL"},
-		{"absolute path", dial, "/repo.git", ""},
-		{"relative dot path", dial, "./repo.git", ""},
-		{"relative dotdot path", dial, "../repo.git", ""},
-		{"file scheme prefix", dial, "file:///repo.git", ""},
+		{"absolute path", dial, "/repo.git", "local remotes are not supported"},
+		{"relative dot path", dial, "./repo.git", "local remotes are not supported"},
+		{"relative dotdot path", dial, "../repo.git", "local remotes are not supported"},
+		{"file scheme prefix", dial, "file:///repo.git", "local remotes are not supported"},
 		{"scp-like ssh", dial, "git@github.com:org/repo.git", "ssh remotes are disabled"},
-		{"bare relative path", dial, "repo.git", ""},
+		{"bare relative path", dial, "repo.git", "local remotes are not supported"},
 		{"https ok", dial, "https://github.com/org/repo.git", ""},
 		{"http ok", dial, "http://github.com/org/repo.git", ""},
 		{"https missing host", dial, "https:///repo.git", "missing host"},
 		{"ssh scheme", dial, "ssh://git@github.com/org/repo.git", "ssh remotes are disabled"},
 		{"git scheme", dial, "git://github.com/org/repo.git", "ssh remotes are disabled"},
-		{"file url scheme", dial, "file:///repo.git", ""},
+		{"file url scheme uppercase", dial, "FILE:///repo.git", "local remotes are not supported"},
 		{"unsupported scheme", dial, "ftp://example.com/repo.git", "unsupported git remote scheme"},
 		{"invalid url", dial, "https://[::1", "invalid git remote URL"},
 	}
@@ -72,6 +75,34 @@ func TestWithPolicyHTTPTransport(t *testing.T) {
 		}
 		if !errors.Is(err, wantErr) {
 			t.Fatalf("expected fn error to propagate, got %v", err)
+		}
+	})
+
+	t.Run("disables host-backed protocols during fn and restores them", func(t *testing.T) {
+		dial := func(ctx context.Context, network, address string) (net.Conn, error) { return nil, nil }
+		before := map[string]transport.Transport{}
+		for _, p := range sandboxedProtocols {
+			before[p] = gitclient.Protocols[p]
+		}
+		err := withPolicyHTTPTransport(dial, func() error {
+			for _, p := range sandboxedProtocols {
+				if _, ok := gitclient.Protocols[p].(disabledTransport); !ok {
+					t.Errorf("protocol %q not disabled during operation", p)
+				}
+			}
+			ep, _ := transport.NewEndpoint("file:///tmp/x.git")
+			if _, err := gitclient.Protocols["file"].NewUploadPackSession(ep, nil); !errors.Is(err, errTransportDisabled) {
+				t.Errorf("file upload-pack session err = %v, want errTransportDisabled", err)
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, p := range sandboxedProtocols {
+			if gitclient.Protocols[p] != before[p] {
+				t.Errorf("protocol %q not restored", p)
+			}
 		}
 	})
 }
