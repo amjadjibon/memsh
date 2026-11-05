@@ -209,23 +209,7 @@ func cmdGitPull(ctx context.Context, w io.Writer, errW io.Writer, fs afero.Fs, c
 		return err
 	}
 
-	remoteName := "origin"
-	var branchName plumbing.ReferenceName
-	// --rebase is accepted but falls back to merge
-	for i := 0; i < len(args); i++ {
-		switch args[i] {
-		case "--rebase":
-			// accepted, ignored
-		default:
-			if !strings.HasPrefix(args[i], "-") {
-				if remoteName == "origin" || remoteName == "" {
-					remoteName = args[i]
-				} else {
-					branchName = plumbing.NewBranchReferenceName(args[i])
-				}
-			}
-		}
-	}
+	remoteName, branchName := parsePullArgs(args)
 
 	pullOpts := &gogit.PullOptions{
 		RemoteName:    remoteName,
@@ -263,32 +247,7 @@ func cmdGitPush(ctx context.Context, w io.Writer, errW io.Writer, fs afero.Fs, c
 		return err
 	}
 
-	remoteName := "origin"
-	force := false
-	tags := false
-	var refSpecs []config.RefSpec
-
-	for i := 0; i < len(args); i++ {
-		switch args[i] {
-		case "-f", "--force":
-			force = true
-		case "--tags":
-			tags = true
-		default:
-			if !strings.HasPrefix(args[i], "-") {
-				if remoteName == "origin" {
-					remoteName = args[i]
-				} else {
-					spec := args[i]
-					if strings.Contains(spec, ":") || strings.HasPrefix(spec, "+") || strings.HasPrefix(spec, "refs/") {
-						refSpecs = append(refSpecs, config.RefSpec(spec))
-					} else {
-						refSpecs = append(refSpecs, config.RefSpec("refs/heads/"+spec+":refs/heads/"+spec))
-					}
-				}
-			}
-		}
-	}
+	remoteName, refSpecs, force, tags := parsePushArgs(args)
 
 	pushOpts := &gogit.PushOptions{
 		RemoteName: remoteName,
@@ -391,4 +350,52 @@ func cmdGitLsRemote(ctx context.Context, w io.Writer, errW io.Writer, fs afero.F
 		fmt.Fprintf(w, "%s\t%s\n", ref.Hash().String(), name)
 	}
 	return nil
+}
+
+// parsePushArgs parses `git push [-f|--force] [--tags] [<remote> [<refspec>...]]`.
+// The first positional is the remote; the rest are refspecs, where a bare
+// branch name means refs/heads/<b>:refs/heads/<b>.
+func parsePushArgs(args []string) (remote string, refSpecs []config.RefSpec, force, tags bool) {
+	remote = "origin"
+	remoteSet := false
+	for _, a := range args {
+		switch a {
+		case "-f", "--force":
+			force = true
+		case "--tags":
+			tags = true
+		default:
+			if strings.HasPrefix(a, "-") {
+				continue
+			}
+			if !remoteSet {
+				remote, remoteSet = a, true
+				continue
+			}
+			if strings.Contains(a, ":") || strings.HasPrefix(a, "+") || strings.HasPrefix(a, "refs/") {
+				refSpecs = append(refSpecs, config.RefSpec(a))
+			} else {
+				refSpecs = append(refSpecs, config.RefSpec("refs/heads/"+a+":refs/heads/"+a))
+			}
+		}
+	}
+	return remote, refSpecs, force, tags
+}
+
+// parsePullArgs parses `git pull [--rebase] [<remote> [<branch>]]`.
+// --rebase is accepted but falls back to merge.
+func parsePullArgs(args []string) (remote string, branch plumbing.ReferenceName) {
+	remote = "origin"
+	remoteSet := false
+	for _, a := range args {
+		if strings.HasPrefix(a, "-") {
+			continue
+		}
+		if !remoteSet {
+			remote, remoteSet = a, true
+		} else {
+			branch = plumbing.NewBranchReferenceName(a)
+		}
+	}
+	return remote, branch
 }
