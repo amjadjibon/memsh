@@ -9,9 +9,10 @@ import (
 	gawkinterp "github.com/benhoyt/goawk/interp"
 	"github.com/benhoyt/goawk/parser"
 	"github.com/spf13/afero"
+	"mvdan.cc/sh/v3/expand"
+	"mvdan.cc/sh/v3/interp"
 
 	"github.com/amjadjibon/memsh/pkg/shell/plugins"
-	"mvdan.cc/sh/v3/interp"
 )
 
 // AwkPlugin runs awk programs via the goawk interpreter.
@@ -93,12 +94,40 @@ func (AwkPlugin) Run(ctx context.Context, args []string) error {
 		stdin = io.MultiReader(readers...)
 	}
 
-	_, execErr := gawkinterp.ExecProgram(prog, &gawkinterp.Config{
-		Stdin:  stdin,
-		Output: hc.Stdout,
-		Error:  hc.Stderr,
+	awk, err := gawkinterp.New(prog)
+	if err != nil {
+		return fmt.Errorf("awk: %w", err)
+	}
+	// goawk defaults to the host OS for system(), "cmd" | getline, print >
+	// file, getline < file and ENVIRON. None of that goes through the virtual
+	// FS, so all of it is disabled and ENVIRON comes from the shell's env.
+	_, execErr := awk.ExecuteContext(ctx, &gawkinterp.Config{
+		Stdin:        stdin,
+		Output:       hc.Stdout,
+		Error:        hc.Stderr,
+		NoExec:       true,
+		NoFileWrites: true,
+		NoFileReads:  true,
+		Environ:      awkEnviron(hc.Env),
 	})
 	return execErr
+}
+
+// awkEnviron flattens the shell's exported variables into goawk's
+// [name, value, name, value, ...] form. A non-nil empty slice keeps goawk
+// from falling back to os.Environ().
+func awkEnviron(env expand.Environ) []string {
+	out := []string{}
+	if env == nil {
+		return out
+	}
+	env.Each(func(name string, vr expand.Variable) bool {
+		if vr.Exported && vr.IsSet() {
+			out = append(out, name, vr.String())
+		}
+		return true
+	})
+	return out
 }
 
 // ensure AwkPlugin satisfies plugins.PluginInfo at compile time.

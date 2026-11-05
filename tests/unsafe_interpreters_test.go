@@ -120,3 +120,56 @@ func TestDefaultShellCannotReachHostOS(t *testing.T) {
 		})
 	}
 }
+
+// TestAwkCannotReachHostOS pins goawk's host-facing features off: system(),
+// command pipes, file redirection and getline from files all bypass the
+// virtual FS, and ENVIRON would otherwise come from os.Environ().
+func TestAwkCannotReachHostOS(t *testing.T) {
+	marker := filepath.Join(t.TempDir(), "escaped.txt")
+	t.Setenv("MEMSH_HOST_ONLY_SECRET", "leaked")
+
+	scripts := map[string]string{
+		"print redirect": `awk 'BEGIN { print "x" > "` + marker + `" }'`,
+		"print append":   `awk 'BEGIN { print "x" >> "` + marker + `" }'`,
+		"system":         `awk 'BEGIN { system("touch ` + marker + `") }'`,
+		"pipe to cmd":    `awk 'BEGIN { print "x" | "tee ` + marker + `" }'`,
+		"cmd getline":    `awk 'BEGIN { "touch ` + marker + `" | getline }'`,
+	}
+	for name, script := range scripts {
+		t.Run(name, func(t *testing.T) {
+			var buf strings.Builder
+			s := NewTestShell(t, &buf, shell.WithFS(afero.NewMemMapFs()))
+			_ = s.Run(context.Background(), script)
+			if _, err := os.Stat(marker); err == nil {
+				t.Fatalf("SANDBOX ESCAPE: awk %s created %s (output %q)", name, marker, buf.String())
+			}
+		})
+	}
+
+	t.Run("getline from host file", func(t *testing.T) {
+		host := filepath.Join(t.TempDir(), "host.txt")
+		if err := os.WriteFile(host, []byte("host-secret\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		var buf strings.Builder
+		s := NewTestShell(t, &buf, shell.WithFS(afero.NewMemMapFs()))
+		_ = s.Run(context.Background(), `awk 'BEGIN { getline line < "`+host+`"; print line }'`)
+		if strings.Contains(buf.String(), "host-secret") {
+			t.Fatalf("awk read a host file: %q", buf.String())
+		}
+	})
+
+	t.Run("ENVIRON is the shell env", func(t *testing.T) {
+		var buf strings.Builder
+		s := NewTestShell(t, &buf, shell.WithFS(afero.NewMemMapFs()), shell.WithInheritEnv(false))
+		_ = s.Run(context.Background(), `awk 'BEGIN { print ENVIRON["MEMSH_HOST_ONLY_SECRET"] }'`)
+		if strings.Contains(buf.String(), "leaked") {
+			t.Fatalf("awk ENVIRON exposed host env: %q", buf.String())
+		}
+		buf.Reset()
+		_ = s.Run(context.Background(), `export GREETING=hi; awk 'BEGIN { print ENVIRON["GREETING"] }'`)
+		if strings.TrimSpace(buf.String()) != "hi" {
+			t.Fatalf("awk ENVIRON missing shell export: %q", buf.String())
+		}
+	})
+}
