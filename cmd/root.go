@@ -17,6 +17,7 @@ import (
 	"github.com/chzyer/readline"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
+	"mvdan.cc/sh/v3/interp"
 
 	"github.com/amjadjibon/memsh/internal/session"
 	"github.com/amjadjibon/memsh/pkg/network"
@@ -40,6 +41,12 @@ var rootCmd = &cobra.Command{
 	Short: "memsh - virtual in-memory shell",
 	Long:  "memsh is a virtual in-memory shell. Run with no arguments to start an interactive REPL, or pass a script file to execute it.",
 	Args:  cobra.MaximumNArgs(1),
+	// Execute prints errors itself. Usage is shown for bad flags/arguments
+	// (caught before PersistentPreRun) but not when a script or server fails.
+	SilenceErrors: true,
+	PersistentPreRun: func(cmd *cobra.Command, _ []string) {
+		cmd.SilenceUsage = true
+	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 
@@ -463,6 +470,12 @@ func init() {
 
 func Execute() {
 	if err := rootCmd.Execute(); err != nil {
+		// A script ending with a non-zero status (e.g. "exit 3") has already
+		// reported its own error; just propagate the status.
+		var status interp.ExitStatus
+		if errors.As(err, &status) {
+			os.Exit(int(status))
+		}
 		fmt.Fprintf(os.Stderr, "memsh: %v\n", err)
 		os.Exit(1)
 	}
