@@ -90,7 +90,8 @@ go run . serve --ssh            # also start SSH server on 127.0.0.1:2222
 
 # MCP server exposing a sandboxed "memsh" tool (one isolated FS per client session)
 go run . mcp                    # stdio (default)
-go run . mcp --transport http --addr :8080   # or --transport sse
+go run . mcp --transport http --api-key secret   # or --transport sse; binds 127.0.0.1:8080
+# mcp http/sse flags: --api-key, --max-sessions (100), --session-ttl (30m), --net-* (private ranges denied)
 ```
 
 Tests live in two places: integration tests in `tests/` (one `<cmd>_test.go` per command, via `NewTestShell`) and unit tests next to each plugin in `pkg/shell/plugins/native/`. Python/Ruby/PHP tests skip when the WASM runtime is not installed.
@@ -125,7 +126,7 @@ Shell.Run(ctx, script)
 - `internal/session/persistence.go` — durable sessions on disk (`--session-store`): snapshot + cwd + runtime/network usage per session, file name is sha256 of the ID.
 - `internal/session/limits.go` — per-session caps (`--session-max-files`, `--session-max-bytes`, `--session-max-runtime`).
 - `internal/session/aliases.go` — `SaveAliases`/`RestoreAliases` persisting aliases to `/.memsh_aliases` in the virtual FS.
-- `internal/mcp/server.go` + `cmd/mcp.go` — MCP server (stdio / streamable HTTP / SSE) built on `github.com/modelcontextprotocol/go-sdk`.
+- `internal/mcp/server.go` + `cmd/mcp.go` — MCP server (stdio / streamable HTTP / SSE) built on `github.com/modelcontextprotocol/go-sdk`; `internal/mcp/pool.go` gives each http/sse session its own shell, caps them, and closes shells whose session ended.
 - `pkg/network/` — outbound network policy, metered dialer, and usage budgets held per `Shell` (`networkPolicy`/`networkDialer` in `shell.go`) so network plugins share one enforcement point; configured by `--net-mode off|allowlist|full`, `--net-allow-domain/-cidr/-port`, and `--net-max-*` budgets (`cmd/flags.go`).
 - `pkg/cron/` + `internal/session/cron.go` — cron scheduling backing the `crontab` plugin.
 - `internal/repl/interactive.go` — interactive REPL (readline, `.memshrc` loading, history).

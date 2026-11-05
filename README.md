@@ -521,8 +521,8 @@ The MCP server exposes a single `memsh` tool that lets any LLM execute bash comm
 | Transport | Command | Use case |
 |---|---|---|
 | stdio (default) | `memsh mcp` | Claude Desktop, Claude Code CLI |
-| HTTP (MCP 2025-03-26+) | `memsh mcp --transport http --addr :8080` | Programmatic / multi-session |
-| SSE (legacy) | `memsh mcp --transport sse --addr :8080` | Legacy MCP clients |
+| HTTP (MCP 2025-03-26+) | `memsh mcp --transport http --api-key "$KEY"` | Programmatic / multi-session |
+| SSE (legacy) | `memsh mcp --transport sse --api-key "$KEY"` | Legacy MCP clients |
 
 **Claude Desktop** (`~/Library/Application Support/Claude/claude_desktop_config.json`):
 
@@ -546,9 +546,11 @@ claude mcp add memsh -- memsh mcp
 **Other MCP clients** — start the HTTP transport and point your client at the endpoint:
 
 ```bash
-memsh mcp --transport http --addr :8080
-# Connect to: http://localhost:8080/
+memsh mcp --transport http --api-key "$KEY"
+# Connect to: http://127.0.0.1:8080/  with header  Authorization: Bearer $KEY
 ```
+
+HTTP and SSE bind to `127.0.0.1:8080` by default; pass `--addr :8080` to listen on all interfaces (always set `--api-key` when you do). Each session gets its own shell, bounded by `--max-sessions` (default 100) and `--session-ttl` (default 30m idle). Outbound network follows the same `--net-*` flags as `memsh serve` and denies loopback/private ranges by default.
 
 **Tool behaviour:**
 - Tool name: `memsh`, input field: `command` (string)

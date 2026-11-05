@@ -39,8 +39,8 @@ func NewServer(sh *shell.Shell, buf *strings.Builder, timeout time.Duration) *mc
 			Name: "memsh",
 			Description: "Execute bash commands in a sandboxed in-memory filesystem. " +
 				"The filesystem persists across calls within a session — use it as a " +
-				"scratch-pad. The real OS filesystem is never touched and no host " +
-				"commands can escape the sandbox. " +
+				"scratch-pad. Commands run against the virtual filesystem, not the " +
+				"host's, and host OS commands are not available. " +
 				"Stdin is not available; commands that read input receive EOF.",
 		},
 		func(ctx context.Context, _ *mcp.CallToolRequest, input bashInput) (*mcp.CallToolResult, any, error) {
