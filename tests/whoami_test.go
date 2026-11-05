@@ -51,6 +51,7 @@ func TestWhoami(t *testing.T) {
 		s := NewTestShell(t, &buf,
 			shell.WithFS(afero.NewMemMapFs()),
 			shell.WithEnv(map[string]string{"LOGNAME": "loguser"}),
+			shell.WithInheritEnv(false), // keep the host USER out
 		)
 		if err := s.Run(ctx, "whoami"); err != nil {
 			t.Fatalf("unexpected error: %v", err)

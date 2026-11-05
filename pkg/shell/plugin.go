@@ -330,7 +330,12 @@ func (s *Shell) runCustomPlugin(ctx context.Context, compiled wazero.CompiledMod
 			if !ok {
 				return -1
 			}
-			val := s.env[string(key)]
+			var val string
+			if get := plugins.ShellCtx(ctx).Env; get != nil {
+				val = get(string(key))
+			} else {
+				val = s.env[string(key)]
+			}
 			if uint32(len(val)) > vLen {
 				return -1
 			}

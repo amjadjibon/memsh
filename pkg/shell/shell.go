@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
-	"maps"
 	"net"
 	"net/http"
 	"os"
@@ -85,18 +84,52 @@ func newShellEnviron(env map[string]string, inheritEnv bool) *shellEnviron {
 
 func (e *shellEnviron) Get(name string) expand.Variable {
 	if v, ok := e.env[name]; ok {
-		return expand.Variable{Exported: true, Kind: expand.String, Str: v}
+		return expand.Variable{Set: true, Exported: true, Kind: expand.String, Str: v}
 	}
 	return e.parent.Get(name)
 }
 
 func (e *shellEnviron) Each(fn func(name string, vr expand.Variable) bool) {
-	e.parent.Each(fn)
+	// Yield each name once: shell-set values override inherited ones.
+	stopped := false
+	e.parent.Each(func(name string, vr expand.Variable) bool {
+		if _, ok := e.env[name]; ok {
+			return true
+		}
+		if !fn(name, vr) {
+			stopped = true
+			return false
+		}
+		return true
+	})
+	if stopped {
+		return
+	}
 	for name, v := range e.env {
-		if !fn(name, expand.Variable{Exported: true, Kind: expand.String, Str: v}) {
+		if !fn(name, expand.Variable{Set: true, Exported: true, Kind: expand.String, Str: v}) {
 			return
 		}
 	}
+}
+
+// exportedVar returns the value of name if it is exported in env.
+func exportedVar(env expand.Environ, name string) string {
+	if vr := env.Get(name); vr.Exported && vr.IsSet() {
+		return vr.String()
+	}
+	return ""
+}
+
+// exportedVars returns every exported, set variable in env.
+func exportedVars(env expand.Environ) map[string]string {
+	out := make(map[string]string)
+	env.Each(func(name string, vr expand.Variable) bool {
+		if vr.Exported && vr.IsSet() {
+			out[name] = vr.String()
+		}
+		return true
+	})
+	return out
 }
 
 // wasmMaxMemoryPages caps a WASM plugin's linear memory (64 KiB pages):
@@ -231,7 +264,8 @@ func (s *Shell) execHandler(next interp.ExecHandlerFunc) interp.ExecHandlerFunc 
 		// Resolve against the directory this command runs in (after any cd
 		// earlier in the same script, or inside a subshell), not s.cwd, which
 		// only advances when Run returns.
-		cwd := s.virtualDir(interp.HandlerCtx(ctx).Dir)
+		hc := interp.HandlerCtx(ctx)
+		cwd := s.virtualDir(hc.Dir)
 		resolve := func(p string) string {
 			if filepath.IsAbs(p) {
 				return p
@@ -240,10 +274,13 @@ func (s *Shell) execHandler(next interp.ExecHandlerFunc) interp.ExecHandlerFunc 
 		}
 
 		ctx = plugins.WithShellContext(ctx, plugins.ShellContext{
-			FS:          s.fs,
-			Cwd:         cwd,
-			Env:         func(key string) string { return s.env[key] },
-			EnvAll:      func() map[string]string { return maps.Clone(s.env) },
+			FS:  s.fs,
+			Cwd: cwd,
+			// Read the environment this command was started with, so exported
+			// variables and "VAR=x cmd" prefixes are visible, not just the
+			// shell's starting environment.
+			Env:         func(key string) string { return exportedVar(hc.Env, key) },
+			EnvAll:      func() map[string]string { return exportedVars(hc.Env) },
 			SetEnv:      func(key, value string) { s.env[key] = value },
 			ResolvePath: resolve,
 			SetCwd:      s.changeDir,
