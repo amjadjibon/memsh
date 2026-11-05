@@ -2,6 +2,8 @@ module github.com/amjadjibon/memsh
 
 go 1.26.0
 
+toolchain go1.26.10
+
 require (
 	github.com/BurntSushi/toml v1.6.0
 	github.com/amjadjibon/calc-go v0.1.0
