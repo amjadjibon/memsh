@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -230,7 +229,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	// ticks every minute, running matching jobs for all active sessions.
 	cronCtx, cronCancel := context.WithCancel(context.Background())
 	defer cronCancel()
-	go session.StartScheduler(cronCtx, store, baseOpts, timeout)
+	go session.StartScheduler(cronCtx, store, baseOpts, timeout, limits)
 
 	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return fmt.Errorf("memsh serve: %w", err)
@@ -243,22 +242,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 const defaultSessionMaxBytes = 256 << 20
 
 // isLoopbackAddr reports whether addr binds only loopback.
-// Empty host, 0.0.0.0, and :: mean all interfaces — not loopback.
-func isLoopbackAddr(addr string) bool {
-	host := addr
-	if h, _, err := net.SplitHostPort(addr); err == nil {
-		host = h
-	}
-	host = strings.Trim(strings.TrimSpace(host), "[]")
-	if host == "" || host == "0.0.0.0" || host == "::" || host == "*" {
-		return false
-	}
-	if host == "localhost" || host == "127.0.0.1" || host == "::1" {
-		return true
-	}
-	ip := net.ParseIP(host)
-	return ip != nil && ip.IsLoopback()
-}
+func isLoopbackAddr(addr string) bool { return internalserver.IsLoopbackAddr(addr) }
 
 // buildShellOpts converts the loaded config into shell options.
 func buildShellOpts(cfg Config) []shell.Option {

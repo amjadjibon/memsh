@@ -12,9 +12,11 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	gliderssh "github.com/gliderlabs/ssh"
@@ -33,6 +35,19 @@ var apiKeyHMACKey = func() []byte {
 }()
 
 const defaultMinTimeout = 5 * time.Second
+
+const (
+	// maxConns caps concurrent SSH connections.
+	maxConns = 64
+	// idleTimeout closes connections with no traffic.
+	idleTimeout = 15 * time.Minute
+	// authFailLimit failed password attempts per source IP within
+	// authFailWindow lock that IP out until the window passes.
+	authFailLimit  = 5
+	authFailWindow = time.Minute
+	// authFailDelay slows each failed attempt.
+	authFailDelay = 500 * time.Millisecond
+)
 
 // ErrServerClosed is returned by ListenAndServe after Close.
 var ErrServerClosed = gliderssh.ErrServerClosed
@@ -75,19 +90,118 @@ func New(cfg Config) (*Server, error) {
 	}
 
 	apiKey := cfg.APIKey
+	throttle := newAuthThrottle()
+	conns := &connLimiter{max: maxConns}
 	srv := &gliderssh.Server{
 		Addr:        cfg.Addr,
 		HostSigners: []gliderssh.Signer{signer},
+		IdleTimeout: idleTimeout,
+		ConnCallback: func(_ gliderssh.Context, c net.Conn) net.Conn {
+			return conns.wrap(c) // nil (rejected) when at the cap
+		},
 		Handler: func(s gliderssh.Session) {
 			handleSession(s, cfg.Store, cfg.BaseOpts, cfg.Timeout, cfg.MinTimeout, cfg.Limits)
 		},
-		// Always require password == API key (hashed constant-time compare).
-		PasswordHandler: func(_ gliderssh.Context, password string) bool {
-			return secureAPIKeyEqual(password, apiKey)
+		// Always require password == API key (hashed constant-time compare),
+		// with per-IP lockout after repeated failures.
+		PasswordHandler: func(ctx gliderssh.Context, password string) bool {
+			ip := remoteIP(ctx.RemoteAddr())
+			if throttle.locked(ip) {
+				time.Sleep(authFailDelay)
+				return false
+			}
+			if secureAPIKeyEqual(password, apiKey) {
+				return true
+			}
+			throttle.fail(ip)
+			time.Sleep(authFailDelay)
+			return false
 		},
 	}
 
 	return &Server{Server: srv}, nil
+}
+
+// authThrottle counts failed password attempts per source IP.
+type authThrottle struct {
+	mu    sync.Mutex
+	fails map[string][]time.Time
+	now   func() time.Time
+}
+
+func newAuthThrottle() *authThrottle {
+	return &authThrottle{fails: make(map[string][]time.Time), now: time.Now}
+}
+
+func (a *authThrottle) recent(ip string) []time.Time {
+	cutoff := a.now().Add(-authFailWindow)
+	kept := a.fails[ip][:0]
+	for _, t := range a.fails[ip] {
+		if t.After(cutoff) {
+			kept = append(kept, t)
+		}
+	}
+	if len(kept) == 0 {
+		delete(a.fails, ip)
+		return nil
+	}
+	a.fails[ip] = kept
+	return kept
+}
+
+func (a *authThrottle) locked(ip string) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return len(a.recent(ip)) >= authFailLimit
+}
+
+func (a *authThrottle) fail(ip string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.fails[ip] = append(a.recent(ip), a.now())
+}
+
+func remoteIP(addr net.Addr) string {
+	if addr == nil {
+		return ""
+	}
+	if host, _, err := net.SplitHostPort(addr.String()); err == nil {
+		return host
+	}
+	return addr.String()
+}
+
+// connLimiter caps concurrent connections.
+type connLimiter struct {
+	mu  sync.Mutex
+	n   int
+	max int
+}
+
+func (l *connLimiter) wrap(c net.Conn) net.Conn {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.n >= l.max {
+		_ = c.Close()
+		return nil
+	}
+	l.n++
+	return &limitedConn{Conn: c, l: l}
+}
+
+type limitedConn struct {
+	net.Conn
+	l    *connLimiter
+	once sync.Once
+}
+
+func (c *limitedConn) Close() error {
+	c.once.Do(func() {
+		c.l.mu.Lock()
+		c.l.n--
+		c.l.mu.Unlock()
+	})
+	return c.Conn.Close()
 }
 
 func secureAPIKeyEqual(a, b string) bool {
@@ -109,9 +223,15 @@ const maxCommandOutput = 10 << 20
 
 // handleSession runs a memsh shell for an incoming SSH connection.
 func handleSession(s gliderssh.Session, store *session.Store, baseOpts []shell.Option, timeout, minTimeout time.Duration, limits session.Limits) {
+	// The SSH username selects the session. Apply the same rule as the HTTP
+	// API (16-64 hex chars) so weak, guessable names cannot be used; anything
+	// else gets a fresh random session.
 	sessionID := s.User()
-	if sessionID == "" || sessionID == "memsh" {
-		b := make([]byte, 8)
+	if !session.ValidSessionID(sessionID) {
+		if sessionID != "" && sessionID != "memsh" {
+			fmt.Fprintf(s.Stderr(), "memsh: username %q is not a session id (16-64 hex chars); starting a new session\r\n", sessionID)
+		}
+		b := make([]byte, 16)
 		_, _ = rand.Read(b)
 		sessionID = fmt.Sprintf("%x", b)
 	}

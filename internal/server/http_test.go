@@ -98,7 +98,7 @@ func TestStartCronScheduler(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		server.StartCronScheduler(ctx, store, baseOpts, time.Second)
+		server.StartCronScheduler(ctx, store, baseOpts, time.Second, session.Limits{})
 		close(done)
 	}()
 

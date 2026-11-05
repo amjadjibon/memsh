@@ -174,3 +174,51 @@ func TestCORSMiddleware(t *testing.T) {
 		}
 	})
 }
+
+func TestOriginGuardMiddleware(t *testing.T) {
+	ok := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
+
+	cases := []struct {
+		name     string
+		loopback bool
+		allowed  string
+		host     string
+		origin   string
+		want     int
+	}{
+		{"curl to localhost", true, "", "127.0.0.1:8080", "", http.StatusNoContent},
+		{"same-origin browser", true, "", "localhost:8080", "http://localhost:8080", http.StatusNoContent},
+		{"ipv6 loopback host", true, "", "[::1]:8080", "", http.StatusNoContent},
+		{"cross-site page", true, "", "127.0.0.1:8080", "https://evil.example", http.StatusForbidden},
+		{"null origin", true, "", "127.0.0.1:8080", "null", http.StatusForbidden},
+		{"dns rebinding host", true, "", "evil.example:8080", "http://evil.example:8080", http.StatusForbidden},
+		{"configured cors origin", true, "https://app.example", "127.0.0.1:8080", "https://app.example", http.StatusNoContent},
+		{"public bind any host", false, "", "memsh.example.com", "", http.StatusNoContent},
+		{"public bind cross-site", false, "", "memsh.example.com", "https://evil.example", http.StatusForbidden},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/run", nil)
+			req.Host = tc.host
+			if tc.origin != "" {
+				req.Header.Set("Origin", tc.origin)
+			}
+			rec := httptest.NewRecorder()
+			OriginGuardMiddleware(ok, tc.loopback, tc.allowed).ServeHTTP(rec, req)
+			if rec.Code != tc.want {
+				t.Fatalf("status %d, want %d", rec.Code, tc.want)
+			}
+		})
+	}
+}
+
+func TestIsLoopbackAddr(t *testing.T) {
+	for addr, want := range map[string]bool{
+		"127.0.0.1:8080": true, "localhost:8080": true, "[::1]:8080": true,
+		":8080": false, "0.0.0.0:8080": false, "[::]:8080": false, "10.0.0.5:8080": false,
+	} {
+		if got := IsLoopbackAddr(addr); got != want {
+			t.Errorf("IsLoopbackAddr(%q) = %v, want %v", addr, got, want)
+		}
+	}
+}

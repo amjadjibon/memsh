@@ -161,13 +161,13 @@ func TestHandleSessionExecMaxSessionsReached(t *testing.T) {
 
 func TestHandleSessionExecRuntimeLimitExceeded(t *testing.T) {
 	store := session.New(context.Background(), time.Hour, 0)
-	entry, ok := store.Get("runtime-limited-user")
+	entry, ok := store.Get("0123456789abcdef0123456789abcdef")
 	if !ok {
 		t.Fatal("Get failed")
 	}
 	entry.Runtime = time.Hour // already over any small limit
 
-	sess := newFakeSession("runtime-limited-user", "", []string{"echo", "hi"})
+	sess := newFakeSession("0123456789abcdef0123456789abcdef", "", []string{"echo", "hi"})
 	handleSession(sess, store, testBaseOpts(), 5*time.Second, 5*time.Second, session.Limits{MaxRuntime: time.Second})
 
 	if !sess.exited || sess.exitCode != 1 {
@@ -223,5 +223,72 @@ func TestHandleSessionDefaultUserGetsGeneratedID(t *testing.T) {
 	// A random session ID should have been minted rather than reusing "memsh".
 	if store.Count() != 1 {
 		t.Errorf("store.Count() = %d, want 1", store.Count())
+	}
+}
+
+func TestHandleSessionRejectsNonHexUsernameAsSessionID(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	store := session.New(ctx, time.Minute, 0)
+	store.Get("alice") // a pre-existing session under a guessable name
+
+	sess := newFakeSession("alice", "", []string{"echo", "hi"})
+	handleSession(sess, store, testBaseOpts(), 5*time.Second, 5*time.Second, session.Limits{})
+
+	if !strings.Contains(sess.stderr.String(), "not a session id") {
+		t.Fatalf("stderr = %q, want notice about invalid session id", sess.stderr.String())
+	}
+	if len(store.Snapshot()) != 2 {
+		t.Fatalf("sessions = %d, want the guessable one untouched plus a fresh random one", len(store.Snapshot()))
+	}
+}
+
+func TestAuthThrottleLocksAfterRepeatedFailures(t *testing.T) {
+	now := time.Now()
+	a := newAuthThrottle()
+	a.now = func() time.Time { return now }
+
+	for i := 0; i < authFailLimit; i++ {
+		if a.locked("1.2.3.4") {
+			t.Fatalf("locked after %d failures, limit %d", i, authFailLimit)
+		}
+		a.fail("1.2.3.4")
+	}
+	if !a.locked("1.2.3.4") {
+		t.Fatal("not locked after reaching the failure limit")
+	}
+	if a.locked("5.6.7.8") {
+		t.Fatal("lockout leaked to another IP")
+	}
+	now = now.Add(authFailWindow + time.Second)
+	if a.locked("1.2.3.4") {
+		t.Fatal("still locked after the window passed")
+	}
+}
+
+func TestConnLimiterCapsConcurrentConnections(t *testing.T) {
+	l := &connLimiter{max: 1}
+	c1, p1 := net.Pipe()
+	defer p1.Close()
+	w1 := l.wrap(c1)
+	if w1 == nil {
+		t.Fatal("first connection rejected")
+	}
+	c2, p2 := net.Pipe()
+	defer p2.Close()
+	if l.wrap(c2) != nil {
+		t.Fatal("second connection accepted past the cap")
+	}
+	_ = w1.Close()
+	_ = w1.Close() // double close must not free two slots
+	c3, p3 := net.Pipe()
+	defer p3.Close()
+	if l.wrap(c3) == nil {
+		t.Fatal("connection rejected after a slot was freed")
+	}
+	c4, p4 := net.Pipe()
+	defer p4.Close()
+	if l.wrap(c4) != nil {
+		t.Fatal("double Close freed an extra slot")
 	}
 }

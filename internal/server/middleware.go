@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"net"
 	"net/http"
+	"net/url"
 	"slices"
 	"strings"
 	"sync"
@@ -175,4 +176,69 @@ func clientIP(r *http.Request, trustProxy bool) string {
 		return r.RemoteAddr
 	}
 	return host
+}
+
+// OriginGuardMiddleware stops web pages on other sites from driving the API
+// through the user's browser.
+//
+//   - Cross-site requests: a browser always sends Origin on cross-origin
+//     POST/DELETE and on fetch() GETs. Requests whose Origin is neither this
+//     server nor allowedOrigin are rejected with 403.
+//   - DNS rebinding: when the server listens only on loopback, the Host header
+//     must name a loopback host (localhost, *.localhost, 127.0.0.0/8, ::1), so
+//     an attacker's domain that re-resolves to 127.0.0.1 is refused.
+//
+// Non-browser clients (curl, SDKs) send no Origin and a loopback Host, so they
+// are unaffected.
+func OriginGuardMiddleware(next http.Handler, loopbackOnly bool, allowedOrigin string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if loopbackOnly && !isLoopbackHost(r.Host) {
+			http.Error(w, `{"error":"forbidden host"}`, http.StatusForbidden)
+			return
+		}
+		if origin := r.Header.Get("Origin"); origin != "" && !originAllowed(origin, r.Host, allowedOrigin) {
+			http.Error(w, `{"error":"cross-origin request refused"}`, http.StatusForbidden)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func originAllowed(origin, host, allowedOrigin string) bool {
+	if allowedOrigin != "" && (allowedOrigin == "*" || strings.EqualFold(origin, allowedOrigin)) {
+		return true
+	}
+	u, err := url.Parse(origin)
+	if err != nil || u.Host == "" {
+		return false // includes the opaque "null" origin
+	}
+	return strings.EqualFold(u.Host, host)
+}
+
+// isLoopbackHost reports whether a Host header (host or host:port) names the
+// local machine.
+func isLoopbackHost(hostport string) bool {
+	host := hostport
+	if h, _, err := net.SplitHostPort(hostport); err == nil {
+		host = h
+	}
+	host = strings.TrimSuffix(strings.Trim(host, "[]"), ".")
+	if strings.EqualFold(host, "localhost") || strings.HasSuffix(strings.ToLower(host), ".localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+// IsLoopbackAddr reports whether a listen address binds only loopback.
+// An empty host, 0.0.0.0 or :: means all interfaces.
+func IsLoopbackAddr(addr string) bool {
+	host := addr
+	if h, _, err := net.SplitHostPort(addr); err == nil {
+		host = h
+	}
+	if host == "" {
+		return false
+	}
+	return isLoopbackHost(host)
 }

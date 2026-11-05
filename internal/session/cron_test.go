@@ -29,7 +29,7 @@ func TestRunSessionCronJobsNoCrontab(t *testing.T) {
 	baseOpts := []shell.Option{shell.WithWASMEnabled(false), shell.WithInheritEnv(false)}
 
 	// No /.crontab present: should return without error or panic.
-	runSessionCronJobs(context.Background(), time.Now(), ss, baseOpts, time.Second)
+	runSessionCronJobs(context.Background(), time.Now(), ss, cronEnv{baseOpts: baseOpts, timeout: time.Second})
 
 	if _, err := afero.Exists(fs, cron.CronLogFile); err == nil {
 		if ok, _ := afero.Exists(fs, cron.CronLogFile); ok {
@@ -47,7 +47,7 @@ func TestRunSessionCronJobsMatchingRuns(t *testing.T) {
 	baseOpts := []shell.Option{shell.WithWASMEnabled(false), shell.WithInheritEnv(false)}
 
 	now := time.Now().Truncate(time.Minute)
-	runSessionCronJobs(context.Background(), now, ss, baseOpts, 5*time.Second)
+	runSessionCronJobs(context.Background(), now, ss, cronEnv{baseOpts: baseOpts, timeout: 5*time.Second})
 
 	data, err := afero.ReadFile(fs, cron.CronLogFile)
 	if err != nil {
@@ -70,7 +70,7 @@ func TestRunSessionCronJobsNonMatchingSkipped(t *testing.T) {
 	ss := testSnap(fs)
 	baseOpts := []shell.Option{shell.WithWASMEnabled(false), shell.WithInheritEnv(false)}
 
-	runSessionCronJobs(context.Background(), time.Now(), ss, baseOpts, time.Second)
+	runSessionCronJobs(context.Background(), time.Now(), ss, cronEnv{baseOpts: baseOpts, timeout: time.Second})
 
 	if ok, _ := afero.Exists(fs, cron.CronLogFile); ok {
 		data, _ := afero.ReadFile(fs, cron.CronLogFile)
@@ -87,7 +87,7 @@ func TestRunSessionCronJobsInvalidCrontabLogsError(t *testing.T) {
 	baseOpts := []shell.Option{shell.WithWASMEnabled(false), shell.WithInheritEnv(false)}
 
 	// Should not panic even though ParseCrontab fails.
-	runSessionCronJobs(context.Background(), time.Now(), ss, baseOpts, time.Second)
+	runSessionCronJobs(context.Background(), time.Now(), ss, cronEnv{baseOpts: baseOpts, timeout: time.Second})
 }
 
 func TestRunCronJobAppendsToExistingLog(t *testing.T) {
@@ -98,7 +98,7 @@ func TestRunCronJobAppendsToExistingLog(t *testing.T) {
 	ss := testSnap(fs)
 	baseOpts := []shell.Option{shell.WithWASMEnabled(false), shell.WithInheritEnv(false)}
 
-	runCronJob(context.Background(), time.Now(), "echo second-run", ss, baseOpts, 5*time.Second)
+	runCronJob(context.Background(), time.Now(), "echo second-run", ss, cronEnv{baseOpts: baseOpts, timeout: 5*time.Second})
 
 	data, err := afero.ReadFile(fs, cron.CronLogFile)
 	if err != nil {
@@ -118,7 +118,7 @@ func TestRunCronJobRecordsErrorInLog(t *testing.T) {
 	ss := testSnap(fs)
 	baseOpts := []shell.Option{shell.WithWASMEnabled(false), shell.WithInheritEnv(false)}
 
-	runCronJob(context.Background(), time.Now(), "nonexistent-command-xyz", ss, baseOpts, 5*time.Second)
+	runCronJob(context.Background(), time.Now(), "nonexistent-command-xyz", ss, cronEnv{baseOpts: baseOpts, timeout: 5*time.Second})
 
 	data, err := afero.ReadFile(fs, cron.CronLogFile)
 	if err != nil {
@@ -136,7 +136,7 @@ func TestStartSchedulerStopsOnCancelBeforeAlignment(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		StartScheduler(ctx, store, baseOpts, time.Second)
+		StartScheduler(ctx, store, baseOpts, time.Second, Limits{})
 		close(done)
 	}()
 
@@ -148,5 +148,50 @@ func TestStartSchedulerStopsOnCancelBeforeAlignment(t *testing.T) {
 	case <-done:
 	case <-time.After(2 * time.Second):
 		t.Fatal("StartScheduler did not return after context cancellation")
+	}
+}
+
+func TestCronJobRespectsSessionBudgets(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	st := New(ctx, time.Hour, 0)
+	const id = "0123456789abcdef"
+	e, _ := st.Get(id)
+	snap := st.Snapshot()[0]
+	baseOpts := []shell.Option{shell.WithWASMEnabled(false), shell.WithInheritEnv(false)}
+
+	// Runtime budget exhausted: the job must not run.
+	st.AddUsage(id, time.Minute, e.Network)
+	runCronJob(ctx, time.Now(), "echo ran > /marker", snap, cronEnv{store: st, baseOpts: baseOpts, timeout: time.Second, limits: Limits{MaxRuntime: time.Second}})
+	if ok, _ := afero.Exists(e.Fs, "/marker"); ok {
+		t.Fatal("cron job ran despite an exhausted runtime budget")
+	}
+
+	// Filesystem cap is enforced during the job's writes.
+	runCronJob(ctx, time.Now(), "yes > /big", snap, cronEnv{store: st, baseOpts: baseOpts, timeout: 5 * time.Second, limits: Limits{MaxBytes: 64 << 10}})
+	if info, err := e.Fs.Stat("/big"); err == nil && info.Size() > 64<<10 {
+		t.Fatalf("cron job wrote %d bytes past a 64 KiB cap", info.Size())
+	}
+
+	// Runtime is charged to the session.
+	before := e.Runtime
+	runCronJob(ctx, time.Now(), "sleep 0.05", snap, cronEnv{store: st, baseOpts: baseOpts, timeout: 5 * time.Second})
+	if e.Runtime <= before {
+		t.Fatal("cron job runtime was not charged to the session")
+	}
+}
+
+func TestCronLogIsBounded(t *testing.T) {
+	ctx := context.Background()
+	fs := afero.NewMemMapFs()
+	_ = afero.WriteFile(fs, cron.CronLogFile, []byte(strings.Repeat("old line\n", maxCronLogBytes/9+10)), 0o644)
+	ss := Snap{ID: "s", Fs: fs, Cwd: "/", ExecMu: &sync.Mutex{}, CronMu: &sync.Mutex{}}
+	runCronJob(ctx, time.Now(), "echo newest", ss, cronEnv{baseOpts: []shell.Option{shell.WithWASMEnabled(false)}, timeout: time.Second})
+	data, _ := afero.ReadFile(fs, cron.CronLogFile)
+	if len(data) > maxCronLogBytes {
+		t.Fatalf("cron log is %d bytes, cap %d", len(data), maxCronLogBytes)
+	}
+	if !strings.Contains(string(data), "newest") {
+		t.Fatal("newest entry missing after trimming")
 	}
 }

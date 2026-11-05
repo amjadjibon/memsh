@@ -340,6 +340,11 @@ func (h *Handler) handleSnapshotPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Don't swap the FS out from under a command that is running in it.
+	if e, ok := h.Store.GetExisting(id); ok {
+		e.ExecMu.Lock()
+		defer e.ExecMu.Unlock()
+	}
 	if ok := h.Store.Replace(id, fs, cwd); !ok {
 		WriteJSON(w, http.StatusTooManyRequests, map[string]string{"error": "maximum number of sessions reached"})
 		return

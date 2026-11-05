@@ -58,8 +58,10 @@ func (st *Store) GetExisting(id string) (*Entry, bool) {
 	if !ok {
 		return nil, false
 	}
+	// Lookups only touch LastUse; persisting here would snapshot the whole
+	// FS to disk under the global lock on every request (and on every
+	// unauthenticated /complete call). State is persisted on Update.
 	e.LastUse = time.Now()
-	st.persistLocked(id, e)
 	return e, true
 }
 
@@ -129,7 +131,6 @@ func (st *Store) Get(id string) (*Entry, bool) {
 	defer st.mu.Unlock()
 	if e, ok := st.entries[id]; ok {
 		e.LastUse = time.Now()
-		st.persistLocked(id, e)
 		return e, true
 	}
 	// Enforce max-sessions limit.
@@ -184,9 +185,28 @@ func (st *Store) updateLocked(id, cwd string, rcLoaded bool, runtimeDelta time.D
 	}
 }
 
+// AddUsage charges runtime and records cumulative network usage for work done
+// outside a request (cron jobs) without touching cwd or rc state.
+func (st *Store) AddUsage(id string, runtimeDelta time.Duration, netUsage network.Usage) {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	if e, ok := st.entries[id]; ok {
+		if runtimeDelta > 0 {
+			e.Runtime += runtimeDelta
+		}
+		e.Network = netUsage
+		st.persistLocked(id, e)
+	}
+}
+
 // Replace creates or overwrites a session with the given filesystem and cwd.
-// Used by the snapshot import endpoint. Returns false if creating a new
-// session would exceed maxEntries.
+// Used by snapshot import and by limit rollback. Runtime and network usage
+// are kept: they are cumulative budgets, and resetting them would let a
+// client clear its limits by re-importing a snapshot.
+//
+// Callers replacing an existing session must hold its ExecMu so the swap
+// cannot race a running command. Returns false if creating a new session
+// would exceed maxEntries.
 func (st *Store) Replace(id string, fs afero.Fs, cwd string) bool {
 	st.mu.Lock()
 	defer st.mu.Unlock()
@@ -195,8 +215,6 @@ func (st *Store) Replace(id string, fs afero.Fs, cwd string) bool {
 		e.Fs = fs
 		e.Cwd = cwd
 		e.RcLoaded = false
-		e.Runtime = 0
-		e.Network = network.Usage{}
 		e.LastUse = now
 		st.persistLocked(id, e)
 		return true

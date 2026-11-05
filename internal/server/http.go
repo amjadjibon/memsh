@@ -78,6 +78,9 @@ func New(cfg Config) (*http.Server, error) {
 	// Security headers (CSP, etc.).
 	h = SecurityHeadersMiddleware(h)
 
+	// Refuse cross-site browser requests and DNS-rebound Host headers.
+	h = OriginGuardMiddleware(h, IsLoopbackAddr(cfg.Addr), cfg.CORSOrigin)
+
 	// CORS (only if an explicit origin is configured).
 	if cfg.CORSOrigin != "" {
 		h = CORSMiddleware(h, cfg.CORSOrigin)
@@ -96,6 +99,6 @@ func New(cfg Config) (*http.Server, error) {
 // It runs in a background goroutine and should be cancelled via the context
 // when the server shuts down. The scheduler fires every minute for all active
 // sessions, executing cron jobs from their respective /.crontab files.
-func StartCronScheduler(ctx context.Context, store *session.Store, baseOpts []shell.Option, timeout time.Duration) {
-	session.StartScheduler(ctx, store, baseOpts, timeout)
+func StartCronScheduler(ctx context.Context, store *session.Store, baseOpts []shell.Option, timeout time.Duration, limits session.Limits) {
+	session.StartScheduler(ctx, store, baseOpts, timeout, limits)
 }

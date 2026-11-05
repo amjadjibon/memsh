@@ -7,6 +7,8 @@ import (
 
 	"github.com/amjadjibon/memsh/internal/session"
 	"github.com/spf13/afero"
+
+	"github.com/amjadjibon/memsh/pkg/network"
 )
 
 func TestStoreReapShutdown(t *testing.T) {
@@ -254,7 +256,6 @@ func TestStoreSnapshot(t *testing.T) {
 	}
 }
 
-
 func TestValidSessionID(t *testing.T) {
 	if !session.ValidSessionID("abcdef0123456789") {
 		t.Error("expected valid hex id")
@@ -393,5 +394,32 @@ func TestNewPersistentDeleteRemovesFile(t *testing.T) {
 	}
 	if _, ok := st2.GetExisting("aaaaaaaaaaaaaaaa"); ok {
 		t.Error("deleted session should not reappear after reload")
+	}
+}
+
+func TestReplaceKeepsUsageBudgets(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	st := session.New(ctx, time.Hour, 0)
+	e, _ := st.Get("0123456789abcdef")
+	st.UpdateWithRuntimeAndNetwork("0123456789abcdef", "/", false, 3*time.Second, network.Usage{Requests: 7})
+
+	if !st.Replace("0123456789abcdef", afero.NewMemMapFs(), "/") {
+		t.Fatal("Replace failed")
+	}
+	if e.Runtime != 3*time.Second || e.Network.Requests != 7 {
+		t.Fatalf("budgets reset by Replace: runtime=%s requests=%d", e.Runtime, e.Network.Requests)
+	}
+}
+
+func TestAddUsageChargesRuntime(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	st := session.New(ctx, time.Hour, 0)
+	e, _ := st.Get("0123456789abcdef")
+	st.AddUsage("0123456789abcdef", time.Second, network.Usage{Requests: 2})
+	st.AddUsage("0123456789abcdef", time.Second, network.Usage{Requests: 3})
+	if e.Runtime != 2*time.Second || e.Network.Requests != 3 {
+		t.Fatalf("runtime=%s requests=%d, want 2s/3", e.Runtime, e.Network.Requests)
 	}
 }
