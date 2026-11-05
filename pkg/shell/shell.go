@@ -59,6 +59,7 @@ type Shell struct {
 	aliases     map[string]string
 	sourceDepth int
 	realCwd     string
+	startCwd    string // virtual cwd the runner was started in (see virtualDir)
 
 	networkPolicy network.Policy
 	networkLimits network.Limits
@@ -142,6 +143,7 @@ func New(opts ...Option) (*Shell, error) {
 		})
 	}
 
+	s.startCwd = s.cwd
 	realCwd := s.cwd
 	if _, err := os.Stat(realCwd); err != nil {
 		tmp, err := os.MkdirTemp("", "memsh-cwd-*")
@@ -226,13 +228,24 @@ func (s *Shell) execHandler(next interp.ExecHandlerFunc) interp.ExecHandlerFunc 
 			return nil
 		}
 
+		// Resolve against the directory this command runs in (after any cd
+		// earlier in the same script, or inside a subshell), not s.cwd, which
+		// only advances when Run returns.
+		cwd := s.virtualDir(interp.HandlerCtx(ctx).Dir)
+		resolve := func(p string) string {
+			if filepath.IsAbs(p) {
+				return p
+			}
+			return filepath.Join(cwd, p)
+		}
+
 		ctx = plugins.WithShellContext(ctx, plugins.ShellContext{
 			FS:          s.fs,
-			Cwd:         s.cwd,
+			Cwd:         cwd,
 			Env:         func(key string) string { return s.env[key] },
 			EnvAll:      func() map[string]string { return maps.Clone(s.env) },
 			SetEnv:      func(key, value string) { s.env[key] = value },
-			ResolvePath: s.resolvePath,
+			ResolvePath: resolve,
 			SetCwd:      s.changeDir,
 			Run:         s.Run,
 			Exec:        s.execArgs,
@@ -456,8 +469,22 @@ func (s *Shell) Run(ctx context.Context, script string) error {
 		return err
 	}
 	err = s.runner.Run(ctx, file)
-	s.cwd = s.runner.Dir
+	s.cwd = s.virtualDir(s.runner.Dir)
 	return err
+}
+
+// virtualDir maps a runner directory to the virtual cwd. When the virtual
+// start directory does not exist on the host, the runner is started in a
+// host temp dir (mvdan.cc/sh requires a real one); that dir stands for the
+// virtual start directory and must never be reported or used as a path.
+func (s *Shell) virtualDir(dir string) string {
+	if dir == "" {
+		return s.cwd
+	}
+	if dir == s.realCwd && s.startCwd != "" {
+		return s.startCwd
+	}
+	return dir
 }
 
 func (s *Shell) readDirHandler(ctx context.Context, path string) ([]fs.DirEntry, error) {

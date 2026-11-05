@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/amjadjibon/memsh/pkg/shell/plugins"
 	"github.com/spf13/afero"
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
@@ -143,6 +144,15 @@ func realPluginDir() (string, error) {
 // runPlugin executes a registered WASM plugin using the shared wazero runtime.
 // CompiledModules are pre-compiled at startup; this only instantiates the module.
 // If a plugin was added after startup it is compiled on first use and cached.
+// pluginCwd returns the directory the current command runs in, as set by
+// execHandler, falling back to the shell's cwd.
+func (s *Shell) pluginCwd(ctx context.Context) string {
+	if cwd := plugins.ShellCtx(ctx).Cwd; cwd != "" {
+		return cwd
+	}
+	return s.cwd
+}
+
 func (s *Shell) runPlugin(ctx context.Context, name string, args []string) error {
 	cm, ok := s.compiled[name]
 	if !ok {
@@ -201,7 +211,7 @@ func (s *Shell) runWASIPlugin(ctx context.Context, compiled wazero.CompiledModul
 
 		// Don't resolve args that start with - or /
 		if len(a) > 0 && a[0] != '-' && a[0] != '/' {
-			resolved[i] = path.Join(s.cwd, a)
+			resolved[i] = path.Join(s.pluginCwd(ctx), a)
 		}
 	}
 
@@ -242,7 +252,7 @@ func (s *Shell) runWASIPlugin(ctx context.Context, compiled wazero.CompiledModul
 		WithArgs(resolved...).
 		WithFSConfig(fsConfig).
 		WithEnv("HOME", "/").
-		WithEnv("PWD", s.cwd).
+		WithEnv("PWD", s.pluginCwd(ctx)).
 		WithEnv("PYTHONDONTWRITEBYTECODE", "1").
 		WithName("")
 
@@ -329,7 +339,7 @@ func (s *Shell) runCustomPlugin(ctx context.Context, compiled wazero.CompiledMod
 		}).Export("env_get").
 		NewFunctionBuilder().
 		WithFunc(func(ctx context.Context, m api.Module, ptr, length uint32) int32 {
-			cwd := s.cwd
+			cwd := s.pluginCwd(ctx)
 			if uint32(len(cwd)) > length {
 				return -1
 			}

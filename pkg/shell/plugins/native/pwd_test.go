@@ -16,10 +16,9 @@ import (
 // PwdPlugin.Run. Reach it dynamically via "xargs" instead.
 
 func TestPwdPluginViaXargs(t *testing.T) {
-	// Note: mvdan.cc/sh's own "cd" builtin changes the interpreter's
-	// directory directly and never calls CdPlugin, so it does not update
-	// Shell.cwd. PwdPlugin reads that (possibly stale) Shell.cwd, so this
-	// asserts today's actual behavior rather than the post-cd directory.
+	// mvdan.cc/sh's own "cd" builtin changes the interpreter's directory
+	// directly and never calls CdPlugin. Plugins still see the new directory
+	// because the exec handler takes cwd from the handler context.
 	ctx := context.Background()
 	fs := afero.NewMemMapFs()
 	_ = fs.MkdirAll("/sub", 0o755)
@@ -29,7 +28,7 @@ func TestPwdPluginViaXargs(t *testing.T) {
 	if err := s.Run(ctx, `cd /sub && echo x | xargs pwd`); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if got := strings.TrimSpace(buf.String()); got != "/" {
-		t.Fatalf("output = %q, want / (Shell.cwd unaffected by mvdan's own cd)", got)
+	if got := strings.TrimSpace(buf.String()); got != "/sub" {
+		t.Fatalf("output = %q, want /sub (the directory after cd)", got)
 	}
 }
