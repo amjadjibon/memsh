@@ -39,7 +39,7 @@ input, leave them off and prefer the WASM plugin path.
 - `make test` runs `go test ./... -v -count=1`.
 - `make cover` writes `coverage.out` and `coverage.html`.
 - `make lint` runs `go vet -stdmethods=false ./...`. CI (`.github/workflows/test.yml`) also runs it plus `govulncheck`.
-- `make release TAG=vX.Y.Z` / `make release-dry-run TAG=vX.Y.Z` run `scripts/release.sh` (goreleaser + homebrew tap).
+- `make release TAG=vX.Y.Z` / `make release-dry-run TAG=vX.Y.Z` run `scripts/release.sh` locally; pushing a `v*.*.*` tag runs the same goreleaser config in CI (`.github/workflows/release.yml`). The cask is published to the shared tap `amjadjibon/homebrew-tap` (`Casks/memsh.rb`), using the `HOMEBREW_TAP_GITHUB_TOKEN` secret.
 
 ### Style and Naming
 - Use `gofmt` formatting; prefer `goimports` for import cleanup.

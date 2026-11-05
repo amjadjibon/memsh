@@ -31,8 +31,7 @@ Shell parsing and interpretation is handled by [mvdan.cc/sh/v3](https://github.c
 ### Homebrew
 
 ```bash
-brew tap amjadjibon/memsh
-brew install memsh
+brew install --cask amjadjibon/tap/memsh
 ```
 
 ### Go Install
@@ -641,13 +640,12 @@ The `make release` command will:
 4. Create and push a git tag
 5. Build binaries for all platforms (Linux, macOS, Windows × AMD64, ARM64)
 6. Create a GitHub Release with all binaries
-7. **Generate and push the Homebrew cask** automatically via goreleaser to [`homebrew-memsh`](https://github.com/amjadjibon/homebrew-memsh)
+7. **Generate and push the Homebrew cask** automatically via goreleaser to the shared tap [`amjadjibon/homebrew-tap`](https://github.com/amjadjibon/homebrew-tap)
 
 After release, users can install via:
 
 ```bash
-brew tap amjadjibon/memsh
-brew install memsh
+brew install --cask amjadjibon/tap/memsh
 ```
 
 **Note:** Ensure `GITHUB_TOKEN` is set for goreleaser to create releases and push to repositories.

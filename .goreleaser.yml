@@ -48,9 +48,12 @@ homebrew_casks:
     description: "Virtual bash shell implemented in Go with in-memory filesystem"
     license: MIT
     skip_upload: false
+    # Shared tap for all amjadjibon tools: brew install --cask amjadjibon/tap/memsh
+    directory: Casks
+    commit_msg_template: "memsh {{ .Version }}"
     repository:
       owner: amjadjibon
-      name: homebrew-memsh
+      name: homebrew-tap
       branch: main
       # Separate PAT with push access to the tap repo; the release itself uses
       # the workflow's GITHUB_TOKEN.
