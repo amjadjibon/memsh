@@ -98,6 +98,10 @@ func (e *shellEnviron) Each(fn func(name string, vr expand.Variable) bool) {
 	}
 }
 
+// wasmMaxMemoryPages caps a WASM plugin's linear memory (64 KiB pages):
+// 16384 pages = 1 GiB, enough for the Python/Ruby/PHP runtimes.
+const wasmMaxMemoryPages = 16384
+
 func New(opts ...Option) (*Shell, error) {
 	s := &Shell{
 		fs:            afero.NewMemMapFs(),
@@ -174,7 +178,12 @@ func New(opts ...Option) (*Shell, error) {
 
 		if len(s.plugins) > 0 {
 			initCtx := context.Background()
-			s.rt = wazero.NewRuntime(initCtx)
+			// CloseOnContextDone lets a request timeout terminate a running
+			// module (otherwise a guest busy loop never returns), and the
+			// page limit caps guest linear memory at wasmMaxMemoryPages*64KiB.
+			s.rt = wazero.NewRuntimeWithConfig(initCtx, wazero.NewRuntimeConfig().
+				WithCloseOnContextDone(true).
+				WithMemoryLimitPages(wasmMaxMemoryPages))
 			wasi_snapshot_preview1.MustInstantiate(initCtx, s.rt)
 
 			for name, wasm := range s.plugins {

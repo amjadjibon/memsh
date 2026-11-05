@@ -136,7 +136,7 @@ func (JqPlugin) Run(ctx context.Context, args []string) error {
 	}
 
 	runOn := func(input any) error {
-		iter := code.Run(input)
+		iter := code.RunWithContext(ctx, input)
 		for {
 			out, ok := iter.Next()
 			if !ok {

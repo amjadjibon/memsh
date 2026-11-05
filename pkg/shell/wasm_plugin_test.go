@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/spf13/afero"
 
@@ -427,5 +428,69 @@ func TestWASIPluginNonZeroExitReturnsError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "exit code") {
 		t.Errorf("error = %v, want it to mention exit code", err)
+	}
+}
+
+// buildCustomPluginModuleLoop builds a custom-ABI module whose "run" export
+// spins forever, with an initial linear memory of memPages pages.
+func buildCustomPluginModuleLoop(memPages uint32) []byte {
+	var mod bytes.Buffer
+	mod.Write([]byte{0x00, 0x61, 0x73, 0x6d})
+	mod.Write([]byte{0x01, 0x00, 0x00, 0x00})
+	mod.Write(wasmSection(1, wasmVec([]byte{0x60, 0x01, 0x7f, 0x01, 0x7f}))) // (i32)->(i32)
+	mod.Write(wasmSection(3, wasmVec([]byte{0x00})))
+	mod.Write(wasmSection(5, wasmVec(append([]byte{0x00}, uleb128(memPages)...))))
+	mod.Write(wasmSection(7, wasmVec(append(wasmName("run"), 0x00, 0x00))))
+	body := []byte{
+		0x00,       // no locals
+		0x03, 0x40, // loop (void)
+		0x0c, 0x00, // br 0
+		0x0b,       // end loop
+		0x41, 0x00, // i32.const 0
+		0x0b, // end
+	}
+	mod.Write(wasmSection(10, wasmVec(append(uleb128(uint32(len(body))), body...))))
+	return mod.Bytes()
+}
+
+func TestWASMPluginStopsOnContextCancel(t *testing.T) {
+	var buf bytes.Buffer
+	s := newTestShell(t, &buf,
+		shell.WithWASMEnabled(true),
+		shell.WithPluginBytes("spin", buildCustomPluginModuleLoop(1)),
+	)
+	defer s.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- s.Run(ctx, "spin") }()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("spin returned nil error after cancellation")
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("WASM busy loop did not stop after context cancellation")
+	}
+}
+
+func TestWASMPluginMemoryLimit(t *testing.T) {
+	var buf bytes.Buffer
+	// 20000 pages (~1.2 GiB) exceeds the runtime's memory limit; the module
+	// must be rejected either at compile time (New) or at instantiation.
+	s, err := shell.New(
+		shell.WithStdIO(strings.NewReader(""), &buf, &buf),
+		shell.WithWASMEnabled(true),
+		shell.WithPluginBytes("huge", buildCustomPluginModuleLoop(20000)),
+	)
+	if err != nil {
+		return
+	}
+	defer s.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := s.Run(ctx, "huge"); err == nil {
+		t.Fatal("module requesting >1 GiB memory ran without error")
 	}
 }

@@ -111,6 +111,18 @@ func (GojaPlugin) Run(ctx context.Context, args []string) error {
 		return fmt.Errorf("goja: setup fs: %w", err)
 	}
 
+	// Stop the VM when the shell context is cancelled (request timeout,
+	// Ctrl-C); otherwise a busy loop would run forever.
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		select {
+		case <-ctx.Done():
+			vm.Interrupt(ctx.Err())
+		case <-done:
+		}
+	}()
+
 	// Execute the code
 	if _, err := vm.RunString(code); err != nil {
 		return fmt.Errorf("goja: %w", err)
