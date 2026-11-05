@@ -33,8 +33,10 @@ var goMu sync.Mutex
 //	go version                            print MVM version
 type GoPlugin struct{}
 
-func (GoPlugin) Name() string        { return "go" }
-func (GoPlugin) Description() string { return "Go tool — run, test, and format Go source in the virtual filesystem (via MVM)" }
+func (GoPlugin) Name() string { return "go" }
+func (GoPlugin) Description() string {
+	return "Go tool — run, test, and format Go source in the virtual filesystem (via MVM)"
+}
 func (GoPlugin) Usage() string {
 	return strings.TrimSpace(`
 go run <file.go>                        run a Go source file

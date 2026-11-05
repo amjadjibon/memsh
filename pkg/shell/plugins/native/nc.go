@@ -40,11 +40,11 @@ func (NcPlugin) Run(ctx context.Context, args []string) error {
 
 	listen := false
 	udp := false
-	scan := false    // -z: port scan only
-	verbose := false // -v
+	scan := false     // -z: port scan only
+	verbose := false  // -v
 	keepOpen := false // -k: keep listening after disconnect
-	noDNS := false   // -n: numeric only
-	timeoutSecs := 0 // -w: connect/idle timeout (0 = none)
+	noDNS := false    // -n: numeric only
+	timeoutSecs := 0  // -w: connect/idle timeout (0 = none)
 	var positional []string
 
 	i := 1

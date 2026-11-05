@@ -31,10 +31,10 @@ func (LsofPlugin) Run(ctx context.Context, args []string) error {
 	hc := interp.HandlerCtx(ctx)
 	sc := plugins.ShellCtx(ctx)
 
-	showDirs := false  // -d: include directories
-	allFiles := false  // -a: include hidden files (dot-files)
+	showDirs := false    // -d: include directories
+	allFiles := false    // -a: include hidden files (dot-files)
 	minSize := int64(-1) // -s: minimum size filter
-	root := "/"        // default: scan everything
+	root := "/"          // default: scan everything
 
 	i := 1
 	for i < len(args) {

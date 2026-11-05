@@ -18,7 +18,9 @@ type NlPlugin struct{}
 
 func (NlPlugin) Name() string        { return "nl" }
 func (NlPlugin) Description() string { return "number lines of files" }
-func (NlPlugin) Usage() string       { return "nl [-b a|t|n] [-n ln|rn|rz] [-w width] [-v start] [-s sep] [FILE...]" }
+func (NlPlugin) Usage() string {
+	return "nl [-b a|t|n] [-n ln|rn|rz] [-w width] [-v start] [-s sep] [FILE...]"
+}
 
 func (NlPlugin) Run(ctx context.Context, args []string) error {
 	hc := interp.HandlerCtx(ctx)
