@@ -491,6 +491,9 @@ func applyPatch(fs afero.Fs, root string, patchData []byte) ([]string, error) {
 	var currentHunk *hunk
 
 	scanner := bufio.NewScanner(bytes.NewReader(patchData))
+	// The patch is already in memory; allow lines as long as the patch itself
+	// (e.g. minified files) instead of bufio's 64 KiB default.
+	scanner.Buffer(nil, len(patchData)+1)
 	for scanner.Scan() {
 		line := scanner.Text()
 
@@ -523,6 +526,10 @@ func applyPatch(fs afero.Fs, root string, patchData []byte) ([]string, error) {
 		if currentHunk != nil && (strings.HasPrefix(line, "+") || strings.HasPrefix(line, "-") || strings.HasPrefix(line, " ")) {
 			currentHunk.lines = append(currentHunk.lines, line)
 		}
+	}
+	// Never apply a partially parsed patch.
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("parse patch: %w", err)
 	}
 
 	for _, fp := range patches {
