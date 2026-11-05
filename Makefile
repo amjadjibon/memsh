@@ -3,12 +3,9 @@ INSTALL    := /usr/local/bin/$(BINARY)
 VERSION    := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 LDFLAGS    := -ldflags "-s -w -X main.version=$(VERSION)"
 
-PLUGIN_SRCS := $(wildcard plugins/*/main.go)
-PLUGIN_WASM := $(patsubst plugins/%/main.go,shell/plugins/%.wasm,$(PLUGIN_SRCS))
+.PHONY: all build install clean test cover lint release release-dry-run help
 
-.PHONY: all build install plugins clean test cover lint release release-dry-run help
-
-all: build plugins
+all: build
 
 build:
 	mkdir -p ./bin
@@ -17,13 +14,8 @@ build:
 install: build
 	sudo mv ./bin/${BINARY} ${INSTALL}
 
-plugins: $(PLUGIN_WASM)
-
-shell/plugins/%.wasm: plugins/%/main.go
-	GOOS=wasip1 GOARCH=wasm go build -o $@ ./$(<D)
-
 clean:
-	rm -f ./bin/$(BINARY) shell/plugins/*.wasm
+	rm -f ./bin/$(BINARY)
 
 test:
 	go test ./... -v -count=1
@@ -46,10 +38,9 @@ release-dry-run:
 help:
 	@echo "memsh - Available commands:"
 	@echo ""
-	@echo "  make all              - Build binaries and plugins"
+	@echo "  make all              - Build the binary"
 	@echo "  make build            - Build binary"
 	@echo "  make install          - Build and install to $(INSTALL)"
-	@echo "  make plugins          - Build WASM plugins"
 	@echo "  make clean            - Remove build artifacts"
 	@echo "  make test             - Run tests"
 	@echo "  make cover            - Generate coverage report"

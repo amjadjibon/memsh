@@ -36,10 +36,9 @@ input, leave them off and prefer the WASM plugin path.
 
 ### Build, Test, and Lint
 - `make build` builds `./bin/memsh`.
-- `make plugins` compiles `plugins/*/main.go` to WASM (no `plugins/` source dir exists today, so it is a no-op).
 - `make test` runs `go test ./... -v -count=1`.
 - `make cover` writes `coverage.out` and `coverage.html`.
-- `make lint` runs `go vet -stdmethods=false ./...`.
+- `make lint` runs `go vet -stdmethods=false ./...`. CI (`.github/workflows/test.yml`) also runs it plus `govulncheck`.
 - `make release TAG=vX.Y.Z` / `make release-dry-run TAG=vX.Y.Z` run `scripts/release.sh` (goreleaser + homebrew tap).
 
 ### Style and Naming
@@ -61,7 +60,7 @@ make build          # build ./bin/memsh
 make test           # run all tests
 make cover          # tests with coverage
 make lint           # go vet -stdmethods=false ./...
-make clean          # remove binaries and .wasm files
+make clean          # remove the built binary
 make install        # install to /usr/local/bin
 
 go run .                        # interactive REPL

@@ -23,6 +23,9 @@ jobs:
       - name: Build
         run: make build
 
+      - name: Vet
+        run: make lint
+
       - name: Test with coverage
         run: go test ./... -coverprofile=coverage.out -covermode=atomic -coverpkg=./...
 
@@ -31,3 +34,18 @@ jobs:
         with:
           files: coverage.out
           token: ${{ secrets.CODECOV_TOKEN }}
+
+  vulncheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      # Fails only on vulnerabilities reachable from memsh's code, which
+      # Dependabot does not distinguish (and sometimes misses entirely).
+      - name: govulncheck
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...

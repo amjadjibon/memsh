@@ -1,51 +1,46 @@
-# memsh Test Suite
+# memsh integration tests
 
-This directory contains integration tests for memsh plugins and commands. All tests run against the virtual in-memory filesystem with WASM disabled for speed.
+Integration tests for memsh commands. They run against an in-memory
+filesystem with WASM disabled for speed. The convention is one
+`<command>_test.go` per command; unit tests for a plugin live next to it in
+`pkg/shell/plugins/native/`.
 
-## Test Files
-
-| File | Command | What's tested |
-| --- | --- | --- |
-| `awk_test.go` | `awk` | Field extraction, file processing, `-f` program file, NR/NF variables |
-| `base64_test.go` | `base64` | Encode from stdin, decode with `-d`, positional args |
-| `find_test.go` | `find` | List entries, `-name` glob, `-type f/d` |
-| `goja_test.go` | `goja` | Inline `-e`, file execution, stdin, modern JS, `fs.readFile()` |
-| `grep_test.go` | `grep` | Pattern match, `-i`, `-v`, `-n`, stdin pipe |
-| `jq_test.go` | `jq` | Field selection, `-r`, `-c`, `-n`, array iteration, virtual FS files, combined flags |
-| `lua_test.go` | `lua` | Inline `-e`, file execution, stdin, tables, `fs_readfile()` |
-| `wc_test.go` | `wc` | `-l`, `-w`, `-c`, multiple files |
-| `yq_test.go` | `yq` | YAML field selection, `-j` JSON output, `-jc` compact, `-r`, virtual FS files, JSON input |
-| `python_test.go` | `python` | Placeholder — skips when plugin not installed |
-| `ruby_test.go` | `ruby` | Placeholder — skips when plugin not installed |
-
-## Running Tests
+## Running
 
 ```bash
-go test ./tests -v                   # all tests
-go test ./tests -run TestJq -v       # single suite
-go test ./tests -run TestYq -v
-go test ./tests -run TestLua -v
-go test ./tests -run TestGrep -v
-go test ./tests -run TestFind -v
-go test ./tests -run TestAwk -v
-go test ./tests -run TestBase64 -v
-go test ./tests -run TestWc -v
-go test ./tests -run TestGoja -v
+go test ./tests -v                # all integration tests
+go test ./tests -run TestJq -v    # one command
+make test                         # whole repository
 ```
 
-## Test Helper
+Python, Ruby and PHP tests skip unless the WASM runtime is installed
+(`memsh plugin install python|ruby|php`).
 
-`helper.go` provides `NewTestShell()`:
+## Helpers (`helper.go`)
+
+| Helper | Use |
+| --- | --- |
+| `NewTestShell(t, &buf, opts...)` | Default shell; stdout and stderr both go to `buf` |
+| `NewInterpreterTestShell(t, &buf, opts...)` | Also registers `lua`, `go` and `sqlite3` (`WithUnsafeInterpreters(true)`) |
+| `RealTmpDir(t)` | Real OS temp dir, for `WithCwd` (which needs an existing host path) |
+| `WithLoopbackNetwork()` | Lets a test reach a local `httptest` server; the default network policy denies loopback and private ranges |
 
 ```go
+fs := afero.NewMemMapFs()
+_ = afero.WriteFile(fs, "/data.json", []byte(`{"name":"memsh"}`), 0o644)
+
 var buf strings.Builder
-s := NewTestShell(t, &buf, shell.WithFS(afero.NewMemMapFs()))
-s.Run(ctx, `jq -r .name /data.json`)
+s := NewTestShell(t, &buf, shell.WithFS(fs))
+_ = s.Run(ctx, `jq -r .name /data.json`)
 out := strings.TrimSpace(buf.String())
 ```
 
-- stdout and stderr both captured in `buf`
-- WASM disabled (`WithWASMEnabled(false)`)
-- Pass additional `shell.Option` values to customise
+## Sandbox regression tests
 
-Pre-seed files with `afero.WriteFile(fs, "/path", []byte(...), 0644)` before creating the shell.
+These guard the security model; keep them passing and extend them when a
+plugin gains host-facing behaviour:
+
+- `unsafe_interpreters_test.go`: lua, go and sqlite3 stay gated; awk cannot run commands or touch host files.
+- `git_sandbox_test.go`: git cannot use local, `file://` or ssh remotes.
+- `cancellation_test.go`: long-running commands stop when the context is cancelled.
+- `cwd_test.go`: commands resolve paths against the directory they run in.
