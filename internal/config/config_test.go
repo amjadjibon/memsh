@@ -123,3 +123,20 @@ func containsCommand(commands []string, want string) bool {
 	}
 	return false
 }
+
+func TestBuildShellOptsUnsafeInterpreters(t *testing.T) {
+	for _, enabled := range []bool{false, true} {
+		cfg := config.Config{Shell: config.ShellConfig{WASM: false, UnsafeInterpreters: enabled}}
+		var out bytes.Buffer
+		opts := append([]shell.Option{shell.WithStdIO(strings.NewReader(""), &out, &out)}, config.BuildShellOpts(cfg)...)
+		s, err := shell.New(opts...)
+		if err != nil {
+			t.Fatalf("shell.New: %v", err)
+		}
+		got := containsCommand(s.Commands(), "sqlite3")
+		s.Close()
+		if got != enabled {
+			t.Fatalf("UnsafeInterpreters=%v: sqlite3 registered = %v", enabled, got)
+		}
+	}
+}
