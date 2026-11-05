@@ -175,6 +175,37 @@ func WithAllowHostListen(allow bool) Option {
 	}
 }
 
+// WithUnsafeInterpreters registers the interpreter-backed plugins that are
+// withheld by default: lua, go and sqlite3 (see GatedInterpreterNames).
+//
+// These embed third-party interpreters that come pre-wired to the host OS —
+// gopher-lua's os.execute, mvm's os/exec binding, and SQLite's ATTACH — so a
+// script can run real commands and touch the real filesystem. memsh cannot
+// revoke that from outside the library, which is why they are opt-in rather
+// than sandboxed.
+//
+// Enable only when the script is as trusted as the host process. Do not enable
+// it for input arriving over the network.
+//
+// Applied in option order, so a later WithDisabledPlugins can still remove an
+// individual command:
+//
+//	shell.New(shell.WithUnsafeInterpreters(true), shell.WithDisabledPlugins("go"))
+func WithUnsafeInterpreters(allow bool) Option {
+	return func(s *Shell) {
+		if !allow {
+			for _, p := range gatedInterpreterPlugins() {
+				delete(s.builtins, p.Name())
+				delete(s.nativePlugins, p.Name())
+			}
+			return
+		}
+		for _, p := range gatedInterpreterPlugins() {
+			s.Register(p)
+		}
+	}
+}
+
 // WithDisabledPlugins removes the named plugins from the shell.
 // Works for both native (builtin) and WASM plugins that are already registered
 // at the time the option is applied (i.e. defaultNativePlugins entries).

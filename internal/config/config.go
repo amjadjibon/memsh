@@ -26,6 +26,12 @@ type ShellConfig struct {
 	// Set to false to skip all WASM plugin loading (faster startup).
 	// Default: true.
 	WASM bool `toml:"wasm"`
+
+	// UnsafeInterpreters registers the lua, go and sqlite3 plugins. They embed
+	// interpreters with host access (os.execute, os/exec, SQLite ATTACH), so
+	// they are withheld unless explicitly enabled.
+	// Default: false.
+	UnsafeInterpreters bool `toml:"unsafe_interpreters"`
 }
 
 // PluginsConfig controls which plugins are loaded.
@@ -75,6 +81,9 @@ func BuildShellOpts(cfg Config) []shell.Option {
 	var opts []shell.Option
 	if !cfg.Shell.WASM {
 		opts = append(opts, shell.WithWASMEnabled(false))
+	}
+	if cfg.Shell.UnsafeInterpreters {
+		opts = append(opts, shell.WithUnsafeInterpreters(true))
 	}
 	if len(cfg.Plugins.WASM) > 0 {
 		opts = append(opts, shell.WithPluginFilter(cfg.Plugins.WASM))

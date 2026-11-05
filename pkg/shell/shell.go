@@ -253,6 +253,10 @@ func (s *Shell) execHandler(next interp.ExecHandlerFunc) interp.ExecHandlerFunc 
 		if s.allowExternalCmds {
 			return next(ctx, args)
 		}
+		if isGatedInterpreter(args[0]) {
+			return fmt.Errorf("%s: disabled by default because it can reach the host OS; "+
+				"enable with --unsafe-interpreters (memsh) or WithUnsafeInterpreters(true) (library)", args[0])
+		}
 		return fmt.Errorf("%s: command not found", args[0])
 	}
 }

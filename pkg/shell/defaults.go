@@ -1,6 +1,8 @@
 package shell
 
 import (
+	"sort"
+
 	"github.com/amjadjibon/memsh/pkg/shell/plugins"
 	"github.com/amjadjibon/memsh/pkg/shell/plugins/native"
 	nativegit "github.com/amjadjibon/memsh/pkg/shell/plugins/native/git"
@@ -70,10 +72,9 @@ func defaultNativePlugins() []plugins.Plugin {
 		native.ExprPlugin{},
 
 		// scripting
-		native.LuaPlugin{},
+		// Note: lua, go and sqlite3 are NOT here — they embed interpreters that
+		// reach the host OS. See gatedInterpreterPlugins.
 		native.GojaPlugin{},
-		native.GoPlugin{},
-		native.SQLitePlugin{},
 
 		// archive
 		native.TarPlugin{},
@@ -149,4 +150,49 @@ func BuiltinPluginNames() []string {
 		names[i] = p.Name()
 	}
 	return names
+}
+
+// gatedInterpreterPlugins returns interpreter-backed plugins that are NOT
+// registered by default because they carry host authority that memsh cannot
+// take away from them:
+//
+//   - lua     gopher-lua opens the full Lua stdlib; os.execute runs real
+//     commands and io.open reads/writes the real filesystem.
+//   - go      mvm binds the entire Go stdlib, including os/exec and syscall,
+//     so interpreted code can spawn real processes.
+//   - sqlite3 operates on a real OS temp file, so ATTACH DATABASE (and
+//     VACUUM INTO) read and write arbitrary real paths.
+//
+// Unlike the WASM plugin path — where a module can only reach what wazero
+// imports into it — these run in-process and are not confined by the virtual
+// filesystem. Enable them with WithUnsafeInterpreters(true) only when the
+// script being run is as trusted as the host process itself.
+func gatedInterpreterPlugins() []plugins.Plugin {
+	return []plugins.Plugin{
+		native.LuaPlugin{},
+		native.GoPlugin{},
+		native.SQLitePlugin{},
+	}
+}
+
+// GatedInterpreterNames returns the command names withheld unless
+// WithUnsafeInterpreters(true) is set.
+func GatedInterpreterNames() []string {
+	gated := gatedInterpreterPlugins()
+	names := make([]string, len(gated))
+	for i, p := range gated {
+		names[i] = p.Name()
+	}
+	sort.Strings(names)
+	return names
+}
+
+// isGatedInterpreter reports whether name is a gated interpreter command.
+func isGatedInterpreter(name string) bool {
+	for _, p := range gatedInterpreterPlugins() {
+		if p.Name() == name {
+			return true
+		}
+	}
+	return false
 }

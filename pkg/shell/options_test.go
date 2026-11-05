@@ -83,3 +83,29 @@ func TestWithNetworkLimitsBlocksDialBeforeNetworkAccess(t *testing.T) {
 		t.Errorf("curl output = %q, want it to mention the network request limit", buf.String())
 	}
 }
+
+func TestWithUnsafeInterpretersFalseRemovesGatedCommands(t *testing.T) {
+	var buf bytes.Buffer
+	s, err := shell.New(
+		shell.WithStdIO(strings.NewReader(""), &buf, &buf),
+		shell.WithWASMEnabled(false),
+		shell.WithUnsafeInterpreters(true),
+		shell.WithUnsafeInterpreters(false),
+	)
+	if err != nil {
+		t.Fatalf("shell.New: %v", err)
+	}
+	defer s.Close()
+
+	for _, c := range s.Commands() {
+		for _, gated := range shell.GatedInterpreterNames() {
+			if c == gated {
+				t.Fatalf("%s still registered after WithUnsafeInterpreters(false)", c)
+			}
+		}
+	}
+	err = s.Run(context.Background(), "lua -e 'print(1)'")
+	if err == nil || !strings.Contains(err.Error(), "disabled by default") {
+		t.Fatalf("Run(lua) error = %v, want 'disabled by default'", err)
+	}
+}
