@@ -222,9 +222,9 @@ func TestNormalizeHost(t *testing.T) {
 
 func TestDomainAllowed(t *testing.T) {
 	tests := []struct {
-		host   string
-		allow  []string
-		want   bool
+		host  string
+		allow []string
+		want  bool
 	}{
 		{"example.com", []string{"example.com"}, true},
 		{"api.example.com", []string{"*.example.com"}, true},

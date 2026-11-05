@@ -47,7 +47,7 @@ func TestRunSessionCronJobsMatchingRuns(t *testing.T) {
 	baseOpts := []shell.Option{shell.WithWASMEnabled(false), shell.WithInheritEnv(false)}
 
 	now := time.Now().Truncate(time.Minute)
-	runSessionCronJobs(context.Background(), now, ss, cronEnv{baseOpts: baseOpts, timeout: 5*time.Second})
+	runSessionCronJobs(context.Background(), now, ss, cronEnv{baseOpts: baseOpts, timeout: 5 * time.Second})
 
 	data, err := afero.ReadFile(fs, cron.CronLogFile)
 	if err != nil {
@@ -98,7 +98,7 @@ func TestRunCronJobAppendsToExistingLog(t *testing.T) {
 	ss := testSnap(fs)
 	baseOpts := []shell.Option{shell.WithWASMEnabled(false), shell.WithInheritEnv(false)}
 
-	runCronJob(context.Background(), time.Now(), "echo second-run", ss, cronEnv{baseOpts: baseOpts, timeout: 5*time.Second})
+	runCronJob(context.Background(), time.Now(), "echo second-run", ss, cronEnv{baseOpts: baseOpts, timeout: 5 * time.Second})
 
 	data, err := afero.ReadFile(fs, cron.CronLogFile)
 	if err != nil {
@@ -118,7 +118,7 @@ func TestRunCronJobRecordsErrorInLog(t *testing.T) {
 	ss := testSnap(fs)
 	baseOpts := []shell.Option{shell.WithWASMEnabled(false), shell.WithInheritEnv(false)}
 
-	runCronJob(context.Background(), time.Now(), "nonexistent-command-xyz", ss, cronEnv{baseOpts: baseOpts, timeout: 5*time.Second})
+	runCronJob(context.Background(), time.Now(), "nonexistent-command-xyz", ss, cronEnv{baseOpts: baseOpts, timeout: 5 * time.Second})
 
 	data, err := afero.ReadFile(fs, cron.CronLogFile)
 	if err != nil {

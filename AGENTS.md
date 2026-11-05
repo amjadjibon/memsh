@@ -220,9 +220,14 @@ Sessions are **always enabled** — no flag needed. Send `X-Session-ID: <id>` on
 
 - **I/O**: always use `interp.HandlerCtx(ctx).Stdout/.Stdin` — never the `s.stdout` field — so commands work correctly in pipes and redirects.
 - **Paths**: `resolvePath` always returns absolute paths with a leading `/`. `aferoSysFS.toAferoPath` prepends `/` because wazero passes paths without it.
+- **Plugin cwd**: inside a plugin use `sc.Cwd` / `sc.ResolvePath` (set per command from `interp.HandlerCtx(ctx).Dir`), never `s.cwd` — `s.cwd` only advances when `Run` returns, so it is stale after a `cd` earlier in the same script or inside a subshell.
 - **wazero lifecycle**: one `wazero.Runtime` per `Shell`. Modules compiled once at `New()`; only `InstantiateModule` called per invocation. Always call `shell.Close()`.
 - **`cd`**: `CdPlugin` calls `sc.SetCwd(dir)` which calls `s.changeDir`, updating both `s.cwd` and `s.runner.Dir` directly. `mvdan.cc/sh` still intercepts the literal `cd` builtin, so the plugin name `"cd"` works because the exec handler runs first via `interp.Interactive(true)` + alias expansion.
 - **External commands**: `next(ctx, args)` (real OS execution) is only called when `s.allowExternalCmds` is true. Default is blocked with `"<cmd>: command not found"`.
+- **No host access from plugins**: a default plugin must only touch `sc.FS`, `sc.NetworkDialContext` and the shell env. Embedded libraries often reach the host by default — goawk (`system()`, pipes, file redirects, `ENVIRON`: run with `NoExec`/`NoFileWrites`/`NoFileReads` and an explicit `Environ`), go-git (file/ssh/git transports: only http(s) remotes, other protocols swapped for a refusing stub), gopher-lua/mvm/sqlite (gated behind `WithUnsafeInterpreters`). Never fall back to `os/user`, `os.Hostname`, `os.Getenv` or `net.Lookup*`; use the virtual identity constants in `native/helpers.go`. Regression tests: `tests/unsafe_interpreters_test.go`, `tests/git_sandbox_test.go`.
+- **Cancellation**: long-running plugins must stop when `ctx` is done (goja `Interrupt`, gojq `RunWithContext`, goawk `ExecuteContext`; wazero runtime uses `WithCloseOnContextDone`). `tests/cancellation_test.go` checks each.
+- **Network default**: `network.DefaultPolicy()` denies loopback/private/reserved ranges. Tests that hit a local server pass `tests.WithLoopbackNetwork()`.
+- **Server limits**: wrap a session FS with `Limits.WrapFS` (enforces bytes/files on write) and buffer output with `session.NewLimitedBuffer`; serve/mcp default `--session-max-bytes` is 256 MiB. The HTTP chain includes `OriginGuardMiddleware` (rejects cross-site `Origin`, and non-loopback `Host` when bound to loopback).
 - **serve opts slice**: use `make([]shell.Option, len(baseOpts)+N)` + `copy` before appending per-request options — avoids Go slice aliasing across concurrent requests.
 - **Env isolation**: use `WithInheritEnv(false)` in server mode to prevent leaking host environment variables to remote users.
 
