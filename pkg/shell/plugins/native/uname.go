@@ -3,7 +3,6 @@ package native
 import (
 	"context"
 	"fmt"
-	"os"
 	"runtime"
 	"strings"
 
@@ -101,11 +100,10 @@ func (UnamePlugin) Run(ctx context.Context, args []string) error {
 
 	node := sc.Env("UNAME_NODE")
 	if node == "" {
-		if h, err := os.Hostname(); err == nil {
-			node = h
-		} else {
-			node = "localhost"
-		}
+		node = sc.Env("HOSTNAME")
+	}
+	if node == "" {
+		node = virtualHostname
 	}
 
 	release := sc.Env("UNAME_RELEASE")
@@ -115,7 +113,7 @@ func (UnamePlugin) Run(ctx context.Context, args []string) error {
 
 	version := sc.Env("UNAME_VERSION")
 	if version == "" {
-		version = "#1 " + runtime.Version()
+		version = "#1 memsh"
 	}
 
 	machine := sc.Env("UNAME_MACHINE")

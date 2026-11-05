@@ -3,8 +3,6 @@ package native
 import (
 	"context"
 	"fmt"
-	"net"
-	"os"
 	"strings"
 
 	"github.com/amjadjibon/memsh/pkg/shell/plugins"
@@ -42,24 +40,17 @@ func (HostnamePlugin) Run(ctx context.Context, args []string) error {
 		}
 	}
 
-	// Prefer virtual env var, then real OS hostname.
+	// Use the virtual HOSTNAME, else a fixed name. The host's real name is
+	// never read, and -f does no DNS lookups (they bypassed the network
+	// policy and would reveal the host's identity).
 	host := sc.Env("HOSTNAME")
 	if host == "" {
-		var err error
-		host, err = os.Hostname()
-		if err != nil {
-			host = "localhost"
-		}
+		host = virtualHostname
 	}
 
 	switch {
 	case fqdn:
-		addrs, err := net.LookupHost(host)
-		if err == nil && len(addrs) > 0 {
-			if names, err := net.LookupAddr(addrs[0]); err == nil && len(names) > 0 {
-				host = strings.TrimSuffix(names[0], ".")
-			}
-		}
+		// The virtual host has no DNS identity; its FQDN is its name.
 	case short:
 		if idx := strings.IndexByte(host, '.'); idx != -1 {
 			host = host[:idx]

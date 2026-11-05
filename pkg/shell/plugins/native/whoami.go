@@ -3,7 +3,6 @@ package native
 import (
 	"context"
 	"fmt"
-	"os/user"
 
 	"github.com/amjadjibon/memsh/pkg/shell/plugins"
 	"mvdan.cc/sh/v3/interp"
@@ -27,14 +26,10 @@ func (WhoamiPlugin) Run(ctx context.Context, args []string) error {
 	if name == "" {
 		name = sc.Env("LOGNAME")
 	}
-	// Fall back to the real OS user so the command always produces output.
+	// Never fall back to the host user: in server mode that would leak the
+	// account memsh runs as. Use the fixed virtual identity instead.
 	if name == "" {
-		if u, err := user.Current(); err == nil {
-			name = u.Username
-		}
-	}
-	if name == "" {
-		name = "unknown"
+		name = virtualUser
 	}
 
 	fmt.Fprintln(hc.Stdout, name)

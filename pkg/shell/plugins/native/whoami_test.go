@@ -63,23 +63,19 @@ func TestWhoami(t *testing.T) {
 		}
 	})
 
-	t.Run("falls back to OS user when no env vars set", func(t *testing.T) {
-		osUser, err := user.Current()
-		if err != nil {
-			t.Skip("cannot determine OS user:", err)
-		}
+	t.Run("uses a virtual identity, never the host user, when env unset", func(t *testing.T) {
 		var buf strings.Builder
-		s := tests.NewTestShell(t, &buf, shell.WithFS(afero.NewMemMapFs()))
-		if err := s.Run(ctx, "whoami"); err != nil {
+		s := tests.NewTestShell(t, &buf, shell.WithFS(afero.NewMemMapFs()), shell.WithInheritEnv(false))
+		if err := s.Run(ctx, "whoami; id"); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		out := strings.TrimSpace(buf.String())
-		if out == "" {
-			t.Error("expected non-empty output")
+		out := buf.String()
+		if !strings.HasPrefix(out, "memsh\n") || !strings.Contains(out, "uid=1000(memsh)") {
+			t.Errorf("output = %q, want virtual identity memsh/1000", out)
 		}
-		// The OS fallback should at minimum return something non-empty.
-		// On most systems it will match the current user.
-		_ = osUser
+		if u, err := user.Current(); err == nil && u.Username != "memsh" && strings.Contains(out, u.Username) {
+			t.Errorf("output leaked host user %q: %q", u.Username, out)
+		}
 	})
 
 	t.Run("output usable in a pipeline", func(t *testing.T) {

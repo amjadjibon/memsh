@@ -3,8 +3,6 @@ package native
 import (
 	"context"
 	"fmt"
-	"os/user"
-	"strconv"
 	"strings"
 
 	"github.com/amjadjibon/memsh/pkg/shell/plugins"
@@ -14,7 +12,7 @@ import (
 // IdPlugin implements the `id` command.
 // It reports the current user's UID, GID, and groups, preferring values from
 // the virtual shell environment (UID, GID, USER, GROUPS) and falling back to
-// the real OS user.
+// a fixed virtual identity.
 type IdPlugin struct{}
 
 func (IdPlugin) Name() string        { return "id" }
@@ -85,7 +83,9 @@ func (IdPlugin) Run(ctx context.Context, args []string) error {
 }
 
 // resolveIdentity returns uid, gid, username, groupName from the virtual shell
-// environment, falling back to the real OS user when env vars are absent.
+// environment (UID, GID, USER/LOGNAME, GROUP), falling back to a fixed
+// virtual identity. It never consults the host OS user database, which in
+// server mode would reveal the account memsh runs as.
 func resolveIdentity(sc plugins.ShellContext) (uid, gid, username, groupName string) {
 	uid = sc.Env("UID")
 	gid = sc.Env("GID")
@@ -93,46 +93,19 @@ func resolveIdentity(sc plugins.ShellContext) (uid, gid, username, groupName str
 	if username == "" {
 		username = sc.Env("LOGNAME")
 	}
-
-	// Fall back to real OS user.
-	if uid == "" || username == "" {
-		if u, err := user.Current(); err == nil {
-			if uid == "" {
-				uid = u.Uid
-			}
-			if gid == "" {
-				gid = u.Gid
-			}
-			if username == "" {
-				username = u.Username
-			}
-		}
-	}
-
-	// Derive numeric defaults when still empty.
 	if uid == "" {
-		uid = "0"
+		uid = virtualUID
 	}
 	if gid == "" {
-		gid = "0"
+		gid = virtualGID
 	}
 	if username == "" {
-		username = "unknown"
+		username = virtualUser
 	}
-
-	// Resolve group name: try OS lookup, else reuse username or numeric gid.
 	groupName = sc.Env("GROUP")
-	if groupName == "" {
-		if gidInt, err := strconv.Atoi(gid); err == nil {
-			if g, err := user.LookupGroupId(strconv.Itoa(gidInt)); err == nil {
-				groupName = g.Name
-			}
-		}
-	}
 	if groupName == "" {
 		groupName = username
 	}
-
 	return uid, gid, username, groupName
 }
 

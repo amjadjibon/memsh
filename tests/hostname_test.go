@@ -27,19 +27,21 @@ func TestHostname(t *testing.T) {
 		}
 	})
 
-	t.Run("falls back to OS hostname when env unset", func(t *testing.T) {
-		osHost, err := os.Hostname()
-		if err != nil {
-			t.Skip("cannot determine OS hostname:", err)
-		}
+	t.Run("uses a virtual hostname, never the host's, when env unset", func(t *testing.T) {
 		var buf strings.Builder
-		s := NewTestShell(t, &buf, shell.WithFS(afero.NewMemMapFs()))
-		if err := s.Run(ctx, "hostname"); err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		out := strings.TrimSpace(buf.String())
-		if out != osHost {
-			t.Errorf("expected %q, got %q", osHost, out)
+		s := NewTestShell(t, &buf, shell.WithFS(afero.NewMemMapFs()), shell.WithInheritEnv(false))
+		for _, cmd := range []string{"hostname", "hostname -f", "uname -n"} {
+			buf.Reset()
+			if err := s.Run(ctx, cmd); err != nil {
+				t.Fatalf("%s: unexpected error: %v", cmd, err)
+			}
+			out := strings.TrimSpace(buf.String())
+			if out != "memsh" {
+				t.Errorf("%s = %q, want virtual hostname \"memsh\"", cmd, out)
+			}
+			if osHost, err := os.Hostname(); err == nil && osHost != "memsh" && out == osHost {
+				t.Errorf("%s leaked the host's hostname", cmd)
+			}
 		}
 	})
 

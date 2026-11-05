@@ -241,3 +241,13 @@ func parseDuration(s string) (time.Duration, error) {
 	}
 	return time.ParseDuration(s)
 }
+
+// Fixed identity reported by whoami, id, hostname and uname when the shell
+// environment does not set USER/UID/GID/HOSTNAME. Host values are never used
+// so a remote client cannot learn the account or machine memsh runs on.
+const (
+	virtualUser     = "memsh"
+	virtualUID      = "1000"
+	virtualGID      = "1000"
+	virtualHostname = "memsh"
+)
