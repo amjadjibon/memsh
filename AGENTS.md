@@ -36,10 +36,11 @@ input, leave them off and prefer the WASM plugin path.
 
 ### Build, Test, and Lint
 - `make build` builds `./bin/memsh`.
-- `make plugins` compiles WASM plugins.
+- `make plugins` compiles `plugins/*/main.go` to WASM (no `plugins/` source dir exists today, so it is a no-op).
 - `make test` runs `go test ./... -v -count=1`.
 - `make cover` writes `coverage.out` and `coverage.html`.
-- `make lint` runs `go vet`.
+- `make lint` runs `go vet -stdmethods=false ./...`.
+- `make release TAG=vX.Y.Z` / `make release-dry-run TAG=vX.Y.Z` run `scripts/release.sh` (goreleaser + homebrew tap).
 
 ### Style and Naming
 - Use `gofmt` formatting; prefer `goimports` for import cleanup.
@@ -59,13 +60,15 @@ input, leave them off and prefer the WASM plugin path.
 make build          # build ./bin/memsh
 make test           # run all tests
 make cover          # tests with coverage
-make lint           # vet (go vet ./...)
+make lint           # go vet -stdmethods=false ./...
 make clean          # remove binaries and .wasm files
 make install        # install to /usr/local/bin
 
 go run .                        # interactive REPL
 go run . ./scripts/etl-pipeline.sh  # run a script file
 echo "ls /" | go run .          # non-interactive pipe
+go run . -c 'echo hi | wc -c'   # run a command string
+go run . --session-store ./s --session-id dev   # persist local session FS across runs
 
 # Plugin management
 go run . plugin list            # list installed plugins
@@ -78,13 +81,19 @@ go test ./...                       # full test suite
 go test ./tests -v                  # integration tests verbose
 go test ./tests -run TestJq -v      # single test suite
 go test ./pkg/shell/... -run TestName  # shell package tests
+go test ./pkg/shell/plugins/native -run TestSed  # per-plugin unit tests
 
-# HTTP server (sessions always enabled, TTL 30m default)
+# HTTP server (sessions always enabled, TTL 30m default, binds 127.0.0.1:8080)
 go run . serve
-go run . serve --addr :3000 --session-ttl 1h --cors
+go run . serve --addr :3000 --session-ttl 1h --cors-origin https://example.com --api-key secret
+go run . serve --ssh            # also start SSH server on 127.0.0.1:2222
+
+# MCP server exposing a sandboxed "memsh" tool (one isolated FS per client session)
+go run . mcp                    # stdio (default)
+go run . mcp --transport http --addr :8080   # or --transport sse
 ```
 
-Test suites in `tests/`: `TestAwk`, `TestBase64`, `TestFind`, `TestGrep`, `TestGo`, `TestGoja`, `TestJq`, `TestLua`, `TestPhp`, `TestPython`, `TestRuby`, `TestWc`, `TestYq`, `TestGit`, `TestSQLite`, `TestSnapshot`, and more.
+Tests live in two places: integration tests in `tests/` (one `<cmd>_test.go` per command, via `NewTestShell`) and unit tests next to each plugin in `pkg/shell/plugins/native/`. Python/Ruby/PHP tests skip when the WASM runtime is not installed.
 
 ## Architecture
 
@@ -111,8 +120,14 @@ Shell.Run(ctx, script)
 - `pkg/shell/plugins/plugin.go` — `Plugin`, `PluginInfo`, `ShellContext` interfaces; `ShellCtx(ctx)`, `WithShellContext()`.
 - `pkg/shell/snapshot.go` — `TakeSnapshot`/`RestoreSnapshot` for serializing `afero.MemMapFs` to JSON.
 - `internal/server/server.go` — HTTP handler (`Handler`), all route registrations and request logic.
+- `internal/server/middleware.go` — API-key auth, CORS, rate limiting (`--trust-proxy` for `X-Forwarded-For`).
 - `internal/session/store.go` — `Store` holding `afero.Fs` + `cwd` + `RcLoaded` per session ID.
+- `internal/session/persistence.go` — durable sessions on disk (`--session-store`): snapshot + cwd + runtime/network usage per session, file name is sha256 of the ID.
+- `internal/session/limits.go` — per-session caps (`--session-max-files`, `--session-max-bytes`, `--session-max-runtime`).
 - `internal/session/aliases.go` — `SaveAliases`/`RestoreAliases` persisting aliases to `/.memsh_aliases` in the virtual FS.
+- `internal/mcp/server.go` + `cmd/mcp.go` — MCP server (stdio / streamable HTTP / SSE) built on `github.com/modelcontextprotocol/go-sdk`.
+- `pkg/network/` — outbound network policy, metered dialer, and usage budgets held per `Shell` (`networkPolicy`/`networkDialer` in `shell.go`) so network plugins share one enforcement point; configured by `--net-mode off|allowlist|full`, `--net-allow-domain/-cidr/-port`, and `--net-max-*` budgets (`cmd/flags.go`).
+- `pkg/cron/` + `internal/session/cron.go` — cron scheduling backing the `crontab` plugin.
 - `internal/repl/interactive.go` — interactive REPL (readline, `.memshrc` loading, history).
 - `internal/ssh/server.go` — SSH server for `memsh serve --ssh`.
 - `web/terminal.html` — single-file browser terminal UI; embedded via `web/embed.go`; served at `GET /`.
@@ -121,41 +136,7 @@ Shell.Run(ctx, script)
 
 Every shell command is a separate file implementing `plugins.Plugin`. All are registered in `defaultNativePlugins()` in `pkg/shell/defaults.go`. There is no central switch statement.
 
-| Plugin file(s) | Command(s) | Library |
-|----------------|-----------|---------|
-| `cat.go`, `head.go`, `tail.go`, `tee.go` | `cat`, `head`, `tail`, `tee` | stdlib |
-| `cp.go`, `mv.go`, `rm.go`, `ln.go` | `cp`, `mv`, `rm`, `ln` | stdlib |
-| `mkdir.go`, `rmdir.go`, `touch.go` | `mkdir`, `rmdir`, `touch` | stdlib |
-| `ls.go`, `cd.go`, `pwd.go`, `du.go`, `df.go` | `ls`, `cd`, `pwd`, `du`, `df` | stdlib |
-| `echo.go`, `printf.go`, `sort.go`, `uniq.go`, `cut.go`, `tr.go`, `sed.go` | `echo`, `printf`, `sort`, `uniq`, `cut`, `tr`, `sed` | stdlib |
-| `stat.go`, `diff.go`, `chmod.go`, `wc.go` | `stat`, `diff`, `chmod`, `wc` | stdlib |
-| `tee.go`, `xargs.go`, `read.go`, `seq.go`, `date.go`, `sleep.go`, `yes.go` | `tee`, `xargs`, `read`, `seq`, `date`, `sleep`, `yes` | stdlib |
-| `env.go`, `printenv.go`, `envsubst.go` | `env`, `printenv`, `envsubst` | stdlib |
-| `source.go`, `dot.go` | `source`, `.` | stdlib |
-| `exit.go`, `quit.go`, `clear.go`, `reset.go` | `exit`, `quit`, `clear`, `reset` | stdlib |
-| `help.go`, `man.go` | `help`, `man` | stdlib |
-| `awk.go` | `awk` | `github.com/benhoyt/goawk` |
-| `grep.go` | `grep` | stdlib |
-| `find.go` | `find` | stdlib |
-| `go.go` | `go` | `github.com/mvm-sh/mvm/interp` — `go run`, `go test`, `go fmt`; **gated**, see security model |
-| `lua.go` | `lua` | `github.com/yuin/gopher-lua` — **gated**, see security model |
-| `goja.go` | `goja` | `github.com/dop251/goja` |
-| `jq.go` | `jq` | `github.com/itchyny/gojq` |
-| `yq.go` | `yq` | `github.com/itchyny/gojq` + `gopkg.in/yaml.v3` |
-| `curl.go` | `curl` | stdlib `net/http` |
-| `checksum.go` | `md5sum`, `sha1sum`, `sha224sum`, `sha256sum`, `sha384sum`, `sha512sum` | stdlib `crypto/*` |
-| `tar.go` | `tar` | stdlib `archive/tar` |
-| `gzip.go` | `gzip`, `gunzip` | stdlib `compress/gzip` |
-| `bc.go`, `calc.go`, `expr.go` | `bc`, `expr` | stdlib |
-| `column.go` | `column` | stdlib |
-| `mktemp.go` | `mktemp` | stdlib |
-| `hexdump.go` | `xxd`, `hexdump` | stdlib |
-| `stty.go` | `tput`, `stty` | stubs for compatibility |
-| `less.go` | `less`, `more` | pager UI (web terminal) |
-| `ssh.go` | `ssh` | stdlib `net` |
-| `crontab.go` | `crontab` | `github.com/robfig/cron/v3` |
-| `sqlite.go` | `sqlite3` | `modernc.org/sqlite` — **gated**, see security model |
-| `git/git.go` | `git` | `github.com/go-git/go-git/v5` |
+The authoritative command list is `defaultNativePlugins()` (grouped by category: filesystem, text processing, data tools, scripting, archive, ...); `lua`, `go` and `sqlite3` live in `gatedInterpreterPlugins()` and are only registered with `WithUnsafeInterpreters(true)` (see security model). Most commands are stdlib-only; notable library-backed ones: `awk` (goawk), `go` (`mvm-sh/mvm/interp` — `go run/test/fmt`), `lua` (gopher-lua), `goja` (JavaScript), `jq`/`yq` (gojq + yaml.v3), `sqlite3` (modernc.org/sqlite), `crontab` (robfig/cron), and `git` (go-git, in the `native/git/` subpackage). Shared flag/IO helpers live in `native/helpers.go`.
 
 `yq` parses YAML/JSON input, runs a jq expression, outputs YAML by default or JSON with `-j`. It normalises `yaml.v3` types through a JSON round-trip so gojq receives plain Go types.
 
@@ -232,7 +213,7 @@ Sessions are **always enabled** — no flag needed. Send `X-Session-ID: <id>` on
 
 **Session design:** `session.Entry` (`internal/session/store.go`) stores `afero.Fs` (pointer — mutations persist across requests) + `cwd` + `RcLoaded` bool. Each request creates a new `Shell` with `WithFS(entry.Fs)` and `WithStdIO(...)` so output is captured per-request while the FS is shared. Aliases are serialised to `/.memsh_aliases` in the virtual FS between requests via `session.SaveAliases`/`RestoreAliases`.
 
-**Flags:** `--addr` (`:8080`), `--session-ttl` (`30m`), `--timeout` (`30s`), `--cors`.
+**Flags:** `--addr` (`127.0.0.1:8080`), `--session-ttl` (`30m`), `--timeout` (`30s`, min 5s), `--cors-origin`, `--api-key` (Bearer auth on mutating endpoints), `--trust-proxy`, `--max-sessions` (`100`), `--session-store`, `--session-max-{files,bytes,runtime}`, `--ssh`/`--ssh-addr`/`--ssh-host-key`, plus the `--net-*` network flags. See `cmd/serve.go`.
 
 ## Critical implementation rules
 
