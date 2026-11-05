@@ -238,6 +238,10 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	return nil
 }
 
+// defaultSessionMaxBytes bounds each remote session's in-memory filesystem
+// (and each ephemeral request's) so one client cannot exhaust server memory.
+const defaultSessionMaxBytes = 256 << 20
+
 // isLoopbackAddr reports whether addr binds only loopback.
 // Empty host, 0.0.0.0, and :: mean all interfaces — not loopback.
 func isLoopbackAddr(addr string) bool {
@@ -284,7 +288,7 @@ func init() {
 	serveCmd.Flags().Int("max-sessions", 100, "Maximum number of concurrent sessions (0 = unlimited)")
 	serveCmd.Flags().String("session-store", "", "Directory path for durable session persistence (empty = in-memory only)")
 	serveCmd.Flags().Int("session-max-files", 0, "Maximum files per session filesystem (0 = unlimited)")
-	serveCmd.Flags().Int64("session-max-bytes", 0, "Maximum total bytes per session filesystem (0 = unlimited)")
+	serveCmd.Flags().Int64("session-max-bytes", defaultSessionMaxBytes, "Maximum total bytes per session filesystem, enforced on write (0 = unlimited)")
 	serveCmd.Flags().Duration("session-max-runtime", 0, "Maximum cumulative command runtime per session (0 = unlimited)")
 	serveCmd.Flags().Bool("ssh", false, "Enable SSH server for remote shell access")
 	serveCmd.Flags().String("ssh-addr", "127.0.0.1:2222", "SSH server listen address (used with --ssh); default binds localhost only")

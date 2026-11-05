@@ -376,3 +376,53 @@ func TestSessionIDNewMints(t *testing.T) {
 		t.Errorf("session_id = %q, want minted id", sid)
 	}
 }
+
+// TestRunEnforcesFSLimitDuringWrite checks a single request cannot grow the
+// session filesystem far past --session-max-bytes before the post-run check.
+func TestRunEnforcesFSLimitDuringWrite(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	store := session.New(ctx, 30*time.Minute, 0)
+	h := server.NewHandler(store, []shell.Option{shell.WithWASMEnabled(false), shell.WithInheritEnv(false)},
+		10*time.Second, session.Limits{MaxBytes: 1 << 20})
+	srv := httptest.NewServer(mux(h))
+	defer srv.Close()
+
+	for _, sid := range []string{"new", ""} { // session and ephemeral
+		req, _ := http.NewRequest(http.MethodPost, srv.URL+"/run", strings.NewReader(`{"script":"yes > /big"}`))
+		req.Header.Set("Content-Type", "application/json")
+		if sid != "" {
+			req.Header.Set("X-Session-ID", sid)
+		}
+		start := time.Now()
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if d := time.Since(start); d > 5*time.Second {
+			t.Fatalf("session %q: writing past the limit took %s; quota not enforced during write", sid, d)
+		}
+	}
+}
+
+func TestRunCapsOutput(t *testing.T) {
+	h, cancel := newTestServer(t)
+	defer cancel()
+	srv := httptest.NewServer(mux(h))
+	defer srv.Close()
+
+	resp, err := http.Post(srv.URL+"/run", "application/json", strings.NewReader(`{"script":"yes"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var result map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		t.Fatal(err)
+	}
+	out, _ := result["output"].(string)
+	if len(out) > server.MaxOutputSize+1024 || !strings.Contains(out, "output truncated") {
+		t.Fatalf("output length %d, truncated marker present: %v", len(out), strings.Contains(out, "output truncated"))
+	}
+}

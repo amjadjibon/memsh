@@ -4,11 +4,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/amjadjibon/memsh/internal/session"
 	"github.com/amjadjibon/memsh/pkg/shell"
 )
 
 func TestPoolEnforcesSessionCap(t *testing.T) {
-	p := NewPool(2, time.Second, shell.WithWASMEnabled(false))
+	p := NewPool(2, session.Limits{}, time.Second, shell.WithWASMEnabled(false))
 	defer p.Close()
 
 	if p.GetServer(nil) == nil || p.GetServer(nil) == nil {
@@ -24,7 +25,7 @@ func TestPoolEnforcesSessionCap(t *testing.T) {
 
 func TestPoolReapsSessionlessServersAfterGrace(t *testing.T) {
 	now := time.Now()
-	p := NewPool(1, time.Second, shell.WithWASMEnabled(false))
+	p := NewPool(1, session.Limits{}, time.Second, shell.WithWASMEnabled(false))
 	p.now = func() time.Time { return now }
 	defer p.Close()
 

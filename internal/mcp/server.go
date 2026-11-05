@@ -4,7 +4,7 @@ package mcp
 import (
 	"context"
 	"errors"
-	"strings"
+	"io"
 	"sync"
 	"time"
 
@@ -18,11 +18,19 @@ type bashInput struct {
 	Command string `json:"command" jsonschema:"The bash command or script to execute"`
 }
 
+// OutputBuffer is the shell's captured stdout/stderr: a *strings.Builder or a
+// size-capped *session.LimitedBuffer.
+type OutputBuffer interface {
+	io.Writer
+	String() string
+	Reset()
+}
+
 // NewServer creates an MCP server with a single "bash" tool backed by sh.
-// buf must be the same *strings.Builder passed to shell.WithStdIO so that
-// output written by the shell can be read after each Run call.
+// buf must be the same buffer passed to shell.WithStdIO so that output
+// written by the shell can be read after each Run call.
 // timeout is applied per tool call; 0 defaults to 30 s.
-func NewServer(sh *shell.Shell, buf *strings.Builder, timeout time.Duration) *mcp.Server {
+func NewServer(sh *shell.Shell, buf OutputBuffer, timeout time.Duration) *mcp.Server {
 	if timeout <= 0 {
 		timeout = 30 * time.Second
 	}

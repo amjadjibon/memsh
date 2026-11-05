@@ -14,10 +14,12 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/spf13/afero"
 	"github.com/spf13/cobra"
 
 	internalmcp "github.com/amjadjibon/memsh/internal/mcp"
 	"github.com/amjadjibon/memsh/internal/server"
+	"github.com/amjadjibon/memsh/internal/session"
 	"github.com/amjadjibon/memsh/pkg/shell"
 )
 
@@ -86,6 +88,7 @@ type mcpConfig struct {
 	apiKey      string
 	maxSessions int
 	sessionTTL  time.Duration
+	limits      session.Limits
 	shellOpts   []shell.Option
 }
 
@@ -98,6 +101,8 @@ func runMCP(cmd *cobra.Command, _ []string) error {
 	c.apiKey, _ = cmd.Flags().GetString("api-key")
 	c.maxSessions, _ = cmd.Flags().GetInt("max-sessions")
 	c.sessionTTL, _ = cmd.Flags().GetDuration("session-ttl")
+	c.limits.MaxBytes, _ = cmd.Flags().GetInt64("session-max-bytes")
+	c.limits.MaxFiles, _ = cmd.Flags().GetInt("session-max-files")
 	c.apiKey = strings.TrimSpace(c.apiKey)
 
 	if c.timeout < 5*time.Second {
@@ -105,6 +110,9 @@ func runMCP(cmd *cobra.Command, _ []string) error {
 	}
 	if c.maxSessions < 0 {
 		return fmt.Errorf("invalid --max-sessions: must be >= 0")
+	}
+	if c.limits.MaxBytes < 0 || c.limits.MaxFiles < 0 {
+		return fmt.Errorf("invalid --session-max-bytes/--session-max-files: must be >= 0")
 	}
 
 	// All log output goes to stderr so it never corrupts the stdio transport.
@@ -175,15 +183,19 @@ func mcpShellOpts(c mcpConfig) ([]shell.Option, error) {
 
 // runStdio runs the MCP server over stdin/stdout (one session, one shell).
 func runStdio(ctx context.Context, c mcpConfig) error {
-	var buf strings.Builder
-	opts := append(append([]shell.Option{}, c.shellOpts...), shell.WithStdIO(strings.NewReader(""), &buf, &buf))
+	fs, err := c.limits.WrapFS(afero.NewMemMapFs())
+	if err != nil {
+		return fmt.Errorf("mcp: fs init: %w", err)
+	}
+	buf := session.NewLimitedBuffer(internalmcp.MaxOutputSize)
+	opts := append(append([]shell.Option{}, c.shellOpts...), shell.WithFS(fs), shell.WithStdIO(strings.NewReader(""), buf, buf))
 	sh, err := shell.New(opts...)
 	if err != nil {
 		return fmt.Errorf("mcp: shell init: %w", err)
 	}
 	defer sh.Close()
 
-	srv := internalmcp.NewServer(sh, &buf, c.timeout)
+	srv := internalmcp.NewServer(sh, buf, c.timeout)
 	log.Printf("stdio started (timeout=%s wasm=%v)", c.timeout, c.wasmEnabled)
 
 	err = srv.Run(ctx, &mcp.StdioTransport{})
@@ -200,7 +212,7 @@ func runStdio(ctx context.Context, c mcpConfig) error {
 // runHTTP serves MCP over Streamable HTTP (MCP spec 2025-03-26+).
 // Each new client session gets its own isolated shell.
 func runHTTP(ctx context.Context, c mcpConfig) error {
-	pool := internalmcp.NewPool(c.maxSessions, c.timeout, c.shellOpts...)
+	pool := internalmcp.NewPool(c.maxSessions, c.limits, c.timeout, c.shellOpts...)
 	go pool.Run(ctx, 30*time.Second)
 
 	handler := mcp.NewStreamableHTTPHandler(pool.GetServer, &mcp.StreamableHTTPOptions{
@@ -214,7 +226,7 @@ func runHTTP(ctx context.Context, c mcpConfig) error {
 // runSSE serves MCP over HTTP+SSE (MCP spec 2024-11-05 legacy).
 // Each SSE connection gets its own isolated shell.
 func runSSE(ctx context.Context, c mcpConfig) error {
-	pool := internalmcp.NewPool(c.maxSessions, c.timeout, c.shellOpts...)
+	pool := internalmcp.NewPool(c.maxSessions, c.limits, c.timeout, c.shellOpts...)
 	go pool.Run(ctx, 30*time.Second)
 
 	handler := mcp.NewSSEHandler(pool.GetServer, nil)
@@ -272,6 +284,8 @@ func init() {
 	mcpCmd.Flags().String("api-key", "", "Require 'Authorization: Bearer <key>' on http and sse transports")
 	mcpCmd.Flags().Int("max-sessions", 100, "Maximum concurrent http/sse sessions, each with its own shell (0 = unlimited)")
 	mcpCmd.Flags().Duration("session-ttl", 30*time.Minute, "Close http sessions idle for this long (0 = never)")
+	mcpCmd.Flags().Int64("session-max-bytes", defaultSessionMaxBytes, "Maximum bytes per session filesystem, enforced on write (0 = unlimited)")
+	mcpCmd.Flags().Int("session-max-files", 0, "Maximum files per session filesystem (0 = unlimited)")
 	addNetworkFlags(mcpCmd.Flags(), &mcpNetFlags)
 	rootCmd.AddCommand(mcpCmd)
 }

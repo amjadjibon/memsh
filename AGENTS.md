@@ -124,7 +124,7 @@ Shell.Run(ctx, script)
 - `internal/server/middleware.go` — API-key auth, CORS, rate limiting (`--trust-proxy` for `X-Forwarded-For`).
 - `internal/session/store.go` — `Store` holding `afero.Fs` + `cwd` + `RcLoaded` per session ID.
 - `internal/session/persistence.go` — durable sessions on disk (`--session-store`): snapshot + cwd + runtime/network usage per session, file name is sha256 of the ID.
-- `internal/session/limits.go` — per-session caps (`--session-max-files`, `--session-max-bytes`, `--session-max-runtime`).
+- `internal/session/limits.go` — per-session caps (`--session-max-files`, `--session-max-bytes` (default 256 MiB), `--session-max-runtime`). `internal/session/quota.go` (`Limits.WrapFS` → `QuotaFs`) enforces the FS caps on every write; `output.go` (`LimitedBuffer`) caps buffered command output at 10 MiB.
 - `internal/session/aliases.go` — `SaveAliases`/`RestoreAliases` persisting aliases to `/.memsh_aliases` in the virtual FS.
 - `internal/mcp/server.go` + `cmd/mcp.go` — MCP server (stdio / streamable HTTP / SSE) built on `github.com/modelcontextprotocol/go-sdk`; `internal/mcp/pool.go` gives each http/sse session its own shell, caps them, and closes shells whose session ended.
 - `pkg/network/` — outbound network policy, metered dialer, and usage budgets held per `Shell` (`networkPolicy`/`networkDialer` in `shell.go`) so network plugins share one enforcement point; configured by `--net-mode off|allowlist|full`, `--net-allow-domain/-cidr/-port`, and `--net-max-*` budgets (`cmd/flags.go`).

@@ -35,6 +35,8 @@ const (
 	MaxRequestBodySize = 1 << 20
 	// MinTimeout is the minimum enforced per-request timeout even if --timeout=0.
 	MinTimeout = 5 * time.Second
+	// MaxOutputSize caps the stdout+stderr a single /run request buffers.
+	MaxOutputSize = 10 << 20
 )
 
 // Handler dependencies.
@@ -107,10 +109,10 @@ func (h *Handler) handleRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var out strings.Builder
+	out := session.NewLimitedBuffer(MaxOutputSize)
 	opts := make([]shell.Option, len(h.BaseOpts)+1)
 	copy(opts, h.BaseOpts)
-	opts[len(h.BaseOpts)] = shell.WithStdIO(strings.NewReader(""), &out, &out)
+	opts[len(h.BaseOpts)] = shell.WithStdIO(strings.NewReader(""), out, out)
 
 	sessionID := strings.TrimSpace(r.Header.Get("X-Session-ID"))
 	var entry *session.Entry
@@ -178,8 +180,21 @@ func (h *Handler) handleRun(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		execTimeout = t
-		opts = append(opts, shell.WithFS(entry.Fs), shell.WithCwd(entry.Cwd))
+		// Enforce FS limits as data is written, not only after the run.
+		quotaFS, err := h.Limits.WrapFS(entry.Fs)
+		if err != nil {
+			log.Printf("memsh serve: measure session fs failed: %v", err)
+			WriteJSON(w, http.StatusInternalServerError, runResponse{Error: "internal server error", Cwd: entry.Cwd, SessionID: sessionID})
+			return
+		}
+		opts = append(opts, shell.WithFS(quotaFS), shell.WithCwd(entry.Cwd))
 		opts = append(opts, shell.WithNetworkUsage(entry.Network))
+	}
+
+	if entry == nil && h.Limits.HasFSLimits() {
+		// Ephemeral runs get the same per-session FS caps.
+		quotaFS, _ := h.Limits.WrapFS(afero.NewMemMapFs())
+		opts = append(opts, shell.WithFS(quotaFS))
 	}
 
 	ctx := native.WithPagerMode(r.Context())

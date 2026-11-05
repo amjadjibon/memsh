@@ -104,6 +104,9 @@ func secureAPIKeyEqual(a, b string) bool {
 	return hmac.Equal(ha, hb)
 }
 
+// maxCommandOutput caps the output buffered for one interactive command.
+const maxCommandOutput = 10 << 20
+
 // handleSession runs a memsh shell for an incoming SSH connection.
 func handleSession(s gliderssh.Session, store *session.Store, baseOpts []shell.Option, timeout, minTimeout time.Duration, limits session.Limits) {
 	sessionID := s.User()
@@ -156,10 +159,16 @@ func handleSession(s gliderssh.Session, store *session.Store, baseOpts []shell.O
 			preRunSnap = snap
 		}
 
+		quotaFS, err := limits.WrapFS(entry.Fs)
+		if err != nil {
+			fmt.Fprintf(s.Stderr(), "error: failed to measure session filesystem\n")
+			_ = s.Exit(1)
+			return
+		}
 		opts := make([]shell.Option, len(baseOpts), len(baseOpts)+3)
 		copy(opts, baseOpts)
 		opts = append(opts,
-			shell.WithFS(entry.Fs),
+			shell.WithFS(quotaFS),
 			shell.WithCwd(entry.Cwd),
 			shell.WithStdIO(s, s, s.Stderr()),
 			shell.WithNetworkUsage(entry.Network),
@@ -274,13 +283,19 @@ func handleSession(s gliderssh.Session, store *session.Store, baseOpts []shell.O
 			preRunSnap = snap
 		}
 
-		var cmdOut strings.Builder
+		cmdOut := session.NewLimitedBuffer(maxCommandOutput)
+		quotaFS, qErr := limits.WrapFS(entry.Fs)
+		if qErr != nil {
+			entry.ExecMu.Unlock()
+			fmt.Fprintf(s, "error: failed to measure session filesystem\r\n")
+			continue
+		}
 		opts := make([]shell.Option, len(baseOpts), len(baseOpts)+3)
 		copy(opts, baseOpts)
 		opts = append(opts,
-			shell.WithFS(entry.Fs),
+			shell.WithFS(quotaFS),
 			shell.WithCwd(cwd),
-			shell.WithStdIO(strings.NewReader(""), &cmdOut, &cmdOut),
+			shell.WithStdIO(strings.NewReader(""), cmdOut, cmdOut),
 			shell.WithNetworkUsage(entry.Network),
 		)
 

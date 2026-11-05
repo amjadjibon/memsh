@@ -9,7 +9,9 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/spf13/afero"
 
+	"github.com/amjadjibon/memsh/internal/session"
 	"github.com/amjadjibon/memsh/pkg/shell"
 )
 
@@ -18,6 +20,9 @@ import (
 // bound, so a brand-new server is briefly sessionless.
 const sessionGrace = time.Minute
 
+// MaxOutputSize caps the output buffered for a single tool call.
+const MaxOutputSize = 10 << 20
+
 // Pool hands out one isolated shell-backed MCP server per client session for
 // the HTTP and SSE transports, caps how many exist at once, and closes each
 // shell once its session has gone away.
@@ -25,6 +30,7 @@ type Pool struct {
 	mu          sync.Mutex
 	entries     []*poolEntry
 	maxSessions int
+	limits      session.Limits
 	timeout     time.Duration
 	shellOpts   []shell.Option
 	now         func() time.Time
@@ -36,11 +42,13 @@ type poolEntry struct {
 	created time.Time
 }
 
-// NewPool creates a pool. maxSessions <= 0 means unlimited. shellOpts are
-// applied to every shell; the pool adds its own WithStdIO.
-func NewPool(maxSessions int, timeout time.Duration, shellOpts ...shell.Option) *Pool {
+// NewPool creates a pool. maxSessions <= 0 means unlimited. limits caps
+// each session's virtual filesystem as it is written. shellOpts are applied
+// to every shell; the pool adds its own WithFS and WithStdIO.
+func NewPool(maxSessions int, limits session.Limits, timeout time.Duration, shellOpts ...shell.Option) *Pool {
 	return &Pool{
 		maxSessions: maxSessions,
+		limits:      limits,
 		timeout:     timeout,
 		shellOpts:   shellOpts,
 		now:         time.Now,
@@ -60,10 +68,15 @@ func (p *Pool) GetServer(_ *http.Request) *mcp.Server {
 		return nil
 	}
 
-	buf := &strings.Builder{}
-	opts := make([]shell.Option, len(p.shellOpts), len(p.shellOpts)+1)
+	fs, err := p.limits.WrapFS(afero.NewMemMapFs())
+	if err != nil {
+		log.Printf("session fs init error: %v", err)
+		return nil
+	}
+	buf := session.NewLimitedBuffer(MaxOutputSize)
+	opts := make([]shell.Option, len(p.shellOpts), len(p.shellOpts)+2)
 	copy(opts, p.shellOpts)
-	opts = append(opts, shell.WithStdIO(strings.NewReader(""), buf, buf))
+	opts = append(opts, shell.WithFS(fs), shell.WithStdIO(strings.NewReader(""), buf, buf))
 	sh, err := shell.New(opts...)
 	if err != nil {
 		log.Printf("session shell init error: %v", err)
